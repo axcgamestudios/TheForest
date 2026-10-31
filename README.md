@@ -4,7 +4,7 @@
 
 Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de juegos: terreno, vegetación, cielo, clima, audio y entidades son sistemas propios. Casi todo el mundo es **generado proceduralmente por código** — las texturas se dibujan en canvas, los árboles crecen por algoritmo, el viento y las aves se sintetizan en tiempo real — complementado con un puñado de assets propios (la efigie, los cristales y el material fotogramétrico del sendero).
 
-> Camina por una pradera de pasto mecido por el viento, sigue el sendero pedregoso que serpentea ladera arriba entre árboles, cruza el anillo de cristales de la cumbre y encara la efigie del Marcador, cuyos glifos laten en rojo… bajo la mirada de un dron que bajará a inspeccionarte. Por el camino: flores luminosas, fragmentos de cristal y reliquias escondidas que dan forma a 12 misiones.
+> Camina por una pradera de pasto mecido por el viento, sigue el sendero pedregoso que serpentea ladera arriba entre árboles, cruza el anillo de cristales de la cumbre y encara la efigie del Marcador, cuyos glifos laten en rojo… bajo la mirada de un dron que bajará a inspeccionarte. Por el camino: flores luminosas, fragmentos de cristal y reliquias escondidas que dan forma a 16 misiones. Y en el valle: un pueblo de cabañas con aserradero, coches para conducir, árboles que talar con el hacha y una casa que construir a tu gusto.
 
 ## 🕹️ Demo en vivo
 
@@ -35,10 +35,18 @@ Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de jueg
 - **Rocas con musgo, troncos caídos, polen flotando** a contraluz.
 
 ### Misiones y progresión
-- **12 misiones** encadenadas por requisitos: caminar, correr, alcanzar puntos de interés (obelisco, cumbre, efigie), acercarse al dron y **coleccionistas**.
+- **16 misiones** encadenadas por requisitos: caminar, correr, alcanzar puntos de interés (obelisco, cumbre, efigie), acercarse al dron, coleccionistas, **talar árboles, conducir, vender madera y construir**.
 - **16 coleccionables interactivos** con brillo: 8 flores luminosas, 5 fragmentos de cristal y 3 reliquias escondidas — se recogen con **E** y detonan destellos y sonidos.
-- **HUD completo**: brújula con marcadores de misión y distancias, rastreador de misiones activas con progreso, avisos emergentes (toasts), **XP y niveles**.
+- **HUD completo**: brújula con marcadores de misión y distancias, rastreador de misiones activas con progreso, recursos (dinero y madera), prompt contextual, avisos emergentes (toasts), **XP y niveles**.
 - Activación por oleadas: siempre hay hasta 4 misiones activas desde el primer minuto.
+
+### Pueblo, economía y construcción
+- **Pueblo del valle**: aserradero con sierra y pila de troncos, tres cabañas de troncos con porch y chimenea, y una casa de dos plantas con balcón — todas con colisión sólida, ventanas con cristal y farolas cálidas.
+- **Coches conducibles**: pickup, SUV y compacto con interior (tablero, volante, asientos), física de conducción sobre el terreno (cabeceo y alabeo reales), colisiones con el mundo, motor sintetizado cuyo tono sigue la velocidad y velocímetro. Sube con **F**.
+- **Tala con hacha**: manos en primera persona moldeadas por código (palma redondeada, dedos con 3 falanges y pulgar) que empuñan el hacha; cada árbol aguanta 3 golpes, cae con animación, deja tocón, entrega madera y reaparece a los 150 s.
+- **Economía persistente**: la madera se vende en el aserradero con **E** ($5 c/u); las misiones dan dinero y XP. Todo se guarda en `localStorage`.
+- **Construye tu casa**: con **B** entras al modo construcción — 5 piezas (tarima, pared, puerta, ventana, techo) con coste en madera + dinero, 2 estilos (madera/piedra), 7 colores, rotación libre y demolución que devuelve la mitad. La casa se guarda y reaparece entre sesiones.
+- **Rayos de sol volumétricos** (god rays) que atraviesan el bosque, con disco solar propio y occlusión real de la geometría (activos en calidad media y alta).
 
 ### La cumbre
 - **Efigie del Marcador** (Dead Space): modelo esculpido real de 1.4M de triángulos, decimado a 105k con herramienta propia, con **glifos emisivos proyectados por UVs cilíndricas que laten** cada ~6 segundos.
@@ -48,10 +56,12 @@ Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de jueg
 ### Presentación
 - **Pantalla de carga con motion graphics**: bosque en siluetas con parallax, niebla que deriva, luciérnagas, rayos de luz y luna — todo animado en un canvas 2D — con anillo de progreso, título con revelado letra a letra y consejos rotativos.
 - **Menú principal cinematográfico**: el mundo 3D real se renderiza detrás mientras una cámara orbital lo sobrevuela; al entrar, transición suave de 1.2 s (posición, orientación y FOV) hasta los ojos del jugador. Menú de pausa con panel de misiones, controles, créditos y selector de calidad.
-- **Iluminación**: sol direccional con sombras de 1024–4096 px que siguen al jugador con anclaje a texels (sin parpadeo), ambiente por IBL del propio cielo, niebla atmosférica.
-- **Postproceso HDR**: bloom, tone mapping ACES, SMAA y viñeta.
-- **Audio 100% sintetizado** con Web Audio API: viento con ráfagas sincronizadas al viento visual, trinos de aves con paneo y distancia, roce del pasto al caminar, pasos que cambian según la superficie (pasto/tierra), aterrizajes con impacto y motivos musicales para recogidas, misiones y subidas de nivel.
-- **Controlador de primera persona**: pointer lock, WASD, sprint, salto, **head-bob pronunciado ligado a la velocidad**, kick de FOV al correr, dip con muelle al aterrizar, respiración al estar quieto y colisión con terreno, árboles, rocas y estructuras.
+
+### Iluminación, audio y controlador
+- **Iluminación**: sol direccional con sombras de 1024–4096 px que siguen al jugador con anclaje a texels (sin parpadeo), ambiente por IBL del propio cielo, niebla atmosférica y **god rays**.
+- **Postproceso HDR**: bloom, tone mapping ACES, god rays, SMAA y viñeta.
+- **Audio 100% sintetizado** con Web Audio API: viento con ráfagas sincronizadas al viento visual, trinos de aves con paneo y distancia, roce del pasto al caminar, pasos que cambian según la superficie, golpes de hacha, caída de árboles, martillazos, monedas y motor del coche — todo sintetizado.
+- **Controlador de primera persona**: pointer lock, WASD, sprint, salto, **head-bob pronunciado ligado a la velocidad**, kick de FOV al correr, dip con muelle al aterrizar, respiración al estar quieto, colisión con terreno, árboles, rocas y estructuras, y **manos visibles animadas**.
 
 ---
 
@@ -104,11 +114,16 @@ Ajustables desde el menú (se recuerdan en `localStorage`) o por parámetro de U
 | Tecla | Acción |
 |---|---|
 | **Clic** (en el menú) | Entrar al juego (captura el mouse y activa el audio) |
-| **W A S D** / flechas | Moverse |
+| **W A S D** / flechas | Moverse (y conducir) |
 | **Mouse** | Mirar |
 | **Shift** | Correr (la cámara se abre al sprint) |
-| **Espacio** | Saltar |
-| **E** | Recoger objetos (flores, cristales, reliquias) |
+| **Espacio** | Saltar / freno de mano en el coche |
+| **E** | Recoger objetos · vender madera en el aserradero |
+| **Clic izquierdo** | Talar árboles con el hacha |
+| **F** | Subir / bajar de los coches |
+| **B** | Modo construcción de tu casa |
+| **1–5** / **R** / **T** / **Y** | Elegir pieza · rotar · estilo madera/piedra · color |
+| **X** | Demoler (devuelve la mitad del coste) |
 | **Esc** | Pausa / menú |
 
 ---
@@ -131,11 +146,15 @@ TheForest/
 │   │   ├── cloudGlsl.ts        # Campo de nubes GLSL compartido (cielo ↔ sombras)
 │   │   └── uniforms.ts         # Uniforms compartidos (viento, jugador, sol)
 │   ├── game/
-│   │   ├── Missions.ts         # 12 misiones, activación por oleadas, XP/niveles
-│   │   └── Collectibles.ts     # Flores, cristales y reliquias con brillo (tecla E)
+│   │   ├── Missions.ts         # 16 misiones, activación por oleadas, XP/niveles
+│   │   ├── Collectibles.ts     # Flores, cristales y reliquias con brillo (tecla E)
+│   │   ├── Economy.ts          # Dinero y madera persistentes (localStorage)
+│   │   ├── Vehicles.ts         # Coches conducibles con física y motor
+│   │   ├── Chopping.ts         # Tala con hacha, astillas y sacudida
+│   │   └── Builder.ts          # Construcción de casas personalizable
 │   ├── ui/
 │   │   ├── bootFx.ts           # Motion graphics de la pantalla de carga (canvas 2D)
-│   │   └── Hud.ts              # Brújula, rastreador, toasts, prompt y XP
+│   │   └── Hud.ts              # Brújula, rastreador, recursos, toasts y XP
 │   ├── world/
 │   │   ├── heightfield.ts      # Relieve analítico, máscara de pasto, sendero
 │   │   ├── Terrain.ts          # Terreno en CHUNKS (detalle/ligero) + splatting PBR
@@ -145,9 +164,11 @@ TheForest/
 │   │   ├── SkyEnv.ts           # Cielo, sol, sombras, niebla, domo de nubes
 │   │   ├── Landmarks.ts        # Efigie, cristales y obelisco
 │   │   ├── Drone.ts            # Dron con máquina de estados de vuelo
+│   │   ├── Structures.ts       # Pueblo: cabañas, aserradero, vallas, farolas
 │   │   └── Details.ts          # Rocas, troncos, polen
 │   ├── player/
-│   │   └── FirstPersonController.ts
+│   │   ├── FirstPersonController.ts
+│   │   └── Hands.ts            # Manos en primera persona + hacha animadas
 │   ├── audio/
 │   │   └── AudioSystem.ts      # Viento, aves, pasos y motivos — todo sintetizado
 │   └── fx/

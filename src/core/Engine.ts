@@ -1,19 +1,25 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'postprocessing';
-import { Heightfield, SPAWN, SUMMIT } from '../world/heightfield';
+import { Heightfield, SPAWN, SUMMIT, SAWMILL } from '../world/heightfield';
 import { createTerrain } from '../world/Terrain';
 import { SkyEnv } from '../world/SkyEnv';
 import { createGrass } from '../world/Grass';
-import { createForest, Collider } from '../world/Trees';
+import { createForest } from '../world/Trees';
 import { createRocks, createLogs, Motes } from '../world/Details';
 import { createLandmarks } from '../world/Landmarks';
+import { createStructures } from '../world/Structures';
 import { Drone } from '../world/Drone';
 import { FirstPersonController } from '../player/FirstPersonController';
+import { Hands } from '../player/Hands';
 import { createComposer } from '../fx/PostProcessing';
 import { AudioSystem } from '../audio/AudioSystem';
 import { shared } from './uniforms';
 import { MissionManager } from '../game/Missions';
 import { Collectibles } from '../game/Collectibles';
+import { Economy } from '../game/Economy';
+import { Vehicles } from '../game/Vehicles';
+import { Chopping } from '../game/Chopping';
+import { Builder } from '../game/Builder';
 import { Hud } from '../ui/Hud';
 
 type Progress = (fraction: number, label: string) => void;
@@ -25,12 +31,13 @@ interface QualityPreset {
   shadowMapSize: number;
   pixelRatioCap: number;
   grassShadows: boolean;
+  godRays: boolean;
 }
 
 const PRESETS: Record<string, QualityPreset> = {
-  low: { grassCount: 12000, shadowMapSize: 1024, pixelRatioCap: 1, grassShadows: false },
-  med: { grassCount: 28000, shadowMapSize: 2048, pixelRatioCap: 1.5, grassShadows: true },
-  high: { grassCount: 42000, shadowMapSize: 4096, pixelRatioCap: 2, grassShadows: true }
+  low: { grassCount: 12000, shadowMapSize: 1024, pixelRatioCap: 1, grassShadows: false, godRays: false },
+  med: { grassCount: 28000, shadowMapSize: 2048, pixelRatioCap: 1.5, grassShadows: true, godRays: true },
+  high: { grassCount: 42000, shadowMapSize: 4096, pixelRatioCap: 2, grassShadows: true, godRays: true }
 };
 
 const MENU_FOV = 58;
@@ -45,6 +52,7 @@ export class Engine {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly missions = new MissionManager();
+  readonly economy = new Economy();
   readonly qualityName: string;
   private readonly clock = new THREE.Clock();
 
@@ -56,8 +64,11 @@ export class Engine {
   audio!: AudioSystem;
   private drone!: Drone;
   collectibles!: Collectibles;
-  private forestUpdate!: (camPos: THREE.Vector3) => void;
-  private terrainUpdate!: (camPos: THREE.Vector3) => void;
+  vehicles!: Vehicles;
+  chopping!: Chopping;
+  builder!: Builder;
+  hands!: Hands;
+  private forest!: ReturnType<typeof createForest>;
   private readonly quality: QualityPreset;
 
   hud: Hud | null = null;
@@ -107,6 +118,67 @@ export class Engine {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.composer?.setSize(window.innerWidth, window.innerHeight);
     });
+
+    this.bindInputs();
+  }
+
+  /** Entradas de juego nuevas: F (coche), B (construir), teclas del
+   * constructor, clic izquierdo (talar / colocar) y E para vender madera. */
+  private bindInputs(): void {
+    window.addEventListener('keydown', (e) => {
+      if (this.mode !== 'play' || this.vehicles.isDriving) return;
+      switch (e.code) {
+        case 'KeyF':
+          if (this.vehicles.toggleEnter()) this.audio.playEvent('door');
+          break;
+        case 'KeyB':
+          this.builder.toggle();
+          this.audio.playEvent('ui');
+          break;
+        case 'KeyE':
+          // Vender madera en el aserradero (si no hay nada que recoger).
+          this.trySellWood();
+          break;
+        default:
+          this.builder.onKey(e.code);
+          break;
+      }
+    });
+
+    // Al conducir sólo queda F para bajar.
+    window.addEventListener('keydown', (e) => {
+      if (this.mode !== 'play' || !this.vehicles.isDriving) return;
+      if (e.code === 'KeyF') {
+        this.vehicles.toggleEnter();
+        this.audio.playEvent('door');
+      }
+    });
+
+    this.renderer.domElement.addEventListener('mousedown', (e) => {
+      if (this.mode !== 'play' || this.vehicles.isDriving) return;
+      if (!document.pointerLockElement) return;
+      if (e.button !== 0) return;
+      if (this.builder.active) {
+        const before = this.economy.money + this.economy.wood;
+        this.builder.onClick();
+        const after = this.economy.money + this.economy.wood;
+        if (after < before) {
+          this.audio.playEvent('hammer');
+        } else if (!this.builder.deleteMode) {
+          this.audio.playEvent('deny');
+        }
+      } else {
+        this.chopping.trySwing();
+      }
+    });
+  }
+
+  private trySellWood(): void {
+    if (this.economy.wood <= 0) return;
+    if (this.collectibles.nearest) return; // prioridad a recoger
+    const p = this.controller.position;
+    if (Math.hypot(p.x - SAWMILL.x, p.z - SAWMILL.z) > SAWMILL.r + 2) return;
+    this.economy.sellWood(5);
   }
 
   /** Construye el mundo por pasos, cediendo al DOM para actualizar la carga. */
@@ -115,47 +187,75 @@ export class Engine {
     await tick();
     this.field = new Heightfield();
 
-    progress(0.22, 'Iluminando el cielo…');
+    progress(0.2, 'Iluminando el cielo…');
     await tick();
     this.sky = new SkyEnv(this.renderer, this.scene, this.quality.shadowMapSize);
 
-    progress(0.38, 'Extendiendo la ladera…');
+    progress(0.34, 'Extendiendo la ladera…');
     await tick();
     const terrain = await createTerrain(this.field);
     this.scene.add(terrain.group);
     this.terrainUpdate = terrain.update;
 
-    progress(0.52, 'Sembrando el pasto…');
+    progress(0.46, 'Sembrando el pasto…');
     await tick();
     const grass = createGrass(this.field, this.quality.grassCount);
     grass.receiveShadow = this.quality.grassShadows;
     this.scene.add(grass);
 
-    progress(0.66, 'Plantando el bosque…');
+    progress(0.56, 'Plantando el bosque…');
     await tick();
-    const forest = createForest(this.field, this.scene);
-    const colliders = forest.colliders;
-    this.forestUpdate = forest.update;
+    this.forest = createForest(this.field, this.scene);
+    const colliders = this.forest.colliders;
 
-    progress(0.78, 'Colocando rocas y troncos…');
+    progress(0.64, 'Levantando el pueblo…');
     await tick();
     createRocks(this.field, this.scene, colliders);
     createLogs(this.field, this.scene, colliders);
+    createStructures(this.scene, this.field, colliders);
     await createLandmarks(this.field, this.scene, colliders);
     this.drone = new Drone(this.scene, this.field);
     this.motes = new Motes(this.scene);
     this.collectibles = new Collectibles(this.scene, this.field);
 
-    progress(0.9, 'Afinando la luz…');
+    progress(0.78, 'Afinando la luz…');
     await tick();
     this.controller = new FirstPersonController(this.camera, this.field, colliders, SPAWN);
+    // La cámara debe colgar de la escena para que sus hijas (las manos en
+    // primera persona) se dibujen.
+    this.scene.add(this.camera);
     this.audio = new AudioSystem(this.field, this.controller);
-    this.composer = createComposer(this.renderer, this.scene, this.camera);
+    this.hands = new Hands(this.camera);
+    this.vehicles = new Vehicles(
+      this.scene,
+      this.field,
+      colliders,
+      this.controller,
+      this.camera,
+      this.audio
+    );
+    this.chopping = new Chopping(
+      this.scene,
+      this.forest,
+      this.controller,
+      this.hands,
+      this.economy,
+      this.audio,
+      this.camera
+    );
+    this.builder = new Builder(this.scene, this.field, this.controller, this.economy, colliders);
+    this.composer = createComposer(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.sky.sunMesh,
+      this.quality.godRays
+    );
 
     // Vista inicial cinematográfica + precompilación de shaders.
     this.updateCinematic(0);
     this.sky.followPlayer(this.camera.position);
-    this.forestUpdate(this.camera.position);
+    this.forest.update(this.camera.position);
     this.terrainUpdate(this.camera.position);
     await this.renderer.compileAsync(this.scene, this.camera);
     this.composer.render(0);
@@ -183,7 +283,7 @@ export class Engine {
     if (playing) {
       if (this.mode === 'paused') {
         this.mode = 'play';
-        this.controller.enabled = true;
+        this.controller.enabled = !this.vehicles.isDriving;
         this.collectibles.setPlaying(true);
       }
       // En 'transition' el control se activa sola al llegar al final.
@@ -212,10 +312,13 @@ export class Engine {
     return this.drone.position;
   }
 
+  private terrainUpdate!: (camPos: THREE.Vector3) => void;
+
   private update(): void {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = shared.uTime.value + dt;
     shared.uTime.value = t;
+    const playing = this.mode === 'play';
 
     switch (this.mode) {
       case 'menu':
@@ -227,7 +330,11 @@ export class Engine {
         break;
 
       case 'play':
-        this.controller.update(dt);
+        if (this.vehicles.isDriving) {
+          this.vehicles.update(dt, this.controller.pressedKeys);
+        } else {
+          this.controller.update(dt);
+        }
         this.updateGameplay(dt, t);
         break;
 
@@ -236,12 +343,26 @@ export class Engine {
         break;
     }
 
+    // Manos visibles sólo en juego y a pie.
+    const handsOn = this.mode === 'play' && !this.vehicles.isDriving;
+    this.hands.setVisible(handsOn);
+    if (handsOn) {
+      this.hands.update(dt, {
+        bobPhase: this.controller.bobPhase,
+        bobIntensity: this.controller.bobIntensity,
+        sprinting: this.controller.isSprinting,
+        grounded: this.controller.isGrounded,
+        lastPickup: this.controller.lastPickup
+      });
+    }
+
     // Ancla de los sistemas que siguen a la cámara (pasto, LOD, sombras).
     const anchor =
       this.mode === 'menu' || this.mode === 'transition' ? this.camera.position : this.controller.position;
     shared.uPlayer.value.set(anchor.x, anchor.z);
     this.sky.followPlayer(anchor);
-    this.forestUpdate(anchor);
+    // El bosque también anima las caídas de árboles (sólo con el juego activo).
+    this.forest.update(anchor, playing ? dt : 0, t);
     this.terrainUpdate(anchor);
     this.motes.update(t, anchor, this.field);
     // El dron siempre patrulla la cumbre y reacciona al jugador.
@@ -306,24 +427,36 @@ export class Engine {
     }
   }
 
-  /** Misiones, coleccionables, HUD y eventos (sólo en juego). */
+  /** Misiones, coleccionables, construcción, economía, HUD y eventos. */
   private updateGameplay(dt: number, t: number): void {
     const p = this.controller.position;
     this.collectibles.update(dt, t, p);
+    this.chopping.update(dt);
+    this.builder.update();
     this.missions.update(
       {
         walked: this.controller.walkedDistance,
         sprinted: this.controller.sprintDistance,
         collected: this.collectibles.collected,
-        playerPos: p
+        playerPos: p,
+        chopped: this.chopping.choppedCount,
+        drove: this.vehicles.hasDriven ? 1 : 0,
+        built: this.builder.builtCount,
+        sold: this.economy.totalSold
       },
       this.dronePosition
     );
 
-    // Eventos -> sonido + avisos del HUD (un único consumidor).
+    // ---- Eventos de misiones: XP, dinero, sonido y avisos ----
     for (const ev of this.missions.completedEvents) {
       this.audio.playEvent('mission');
-      this.hud?.toast('mission', ev.def.title, `Misión completada · +${ev.xp} XP`);
+      const cash = ev.def.cash ?? 0;
+      if (cash > 0) this.economy.addCash(cash);
+      this.hud?.toast(
+        'mission',
+        ev.def.title,
+        `Misión completada · +${ev.xp} XP${cash ? ` · +$${cash}` : ''}`
+      );
     }
     this.missions.completedEvents.length = 0;
 
@@ -338,8 +471,10 @@ export class Engine {
     }
     this.missions.levelUpEvents.length = 0;
 
+    // ---- Coleccionables ----
     for (const c of this.collectibles.collectedEvents) {
       this.audio.playEvent('pickup');
+      this.controller.lastPickup = t; // las manos hacen el gesto de alcanzar
       this.hud?.toast(
         'item',
         c.kind === 'flower' ? 'Flor luminosa' : c.kind === 'crystal' ? 'Fragmento de cristal' : 'Reliquia antigua',
@@ -347,6 +482,29 @@ export class Engine {
       );
     }
     this.collectibles.collectedEvents.length = 0;
+
+    // ---- Árboles talados: madera + retumbo ----
+    for (const f of this.forest.fellEvents) {
+      this.audio.playEvent('fall');
+      this.economy.addWood(f.wood);
+      this.hud?.toast('wood', 'Árbol talado', `+${f.wood} de madera · véndela en el aserradero`);
+    }
+    this.forest.fellEvents.length = 0;
+
+    // ---- Economía: sonidos y avisos ----
+    for (const ev of this.economy.events) {
+      if (ev.kind === 'cash') {
+        this.audio.playEvent('cash');
+        this.hud?.toast('cash', 'Dinero ganado', `+$${ev.amount}`);
+      } else if (ev.kind === 'sell') {
+        this.audio.playEvent('cash');
+        this.hud?.toast('cash', 'Madera vendida', `+$${ev.amount} en el aserradero`);
+      } else if (ev.kind === 'spend') {
+        this.hud?.toast('build', 'Pieza colocada', `Materiales gastados · -$${ev.amount}`);
+      }
+      // 'wood' ya tiene su aviso al talar.
+    }
+    this.economy.events.length = 0;
 
     this.hud?.update(dt);
   }

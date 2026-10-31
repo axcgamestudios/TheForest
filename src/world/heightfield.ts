@@ -19,6 +19,12 @@ const PATH: [number, number][] = [
 /** Cumbre del cerro (torre de telecomunicaciones). */
 export const SUMMIT = { x: -70, z: -170 };
 
+/** Claro del pueblo del valle: los árboles evitan esta zona. */
+export const VILLAGE = { x: 56, z: 122, r: 40 };
+
+/** Aserradero: punto de venta de madera. */
+export const SAWMILL = { x: 52, z: 118, r: 6 };
+
 const HALF = WORLD_SIZE / 2;
 
 /** Altura analítica del terreno en metros. */

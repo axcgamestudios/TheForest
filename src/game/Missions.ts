@@ -2,7 +2,17 @@ import * as THREE from 'three';
 import { SUMMIT } from '../world/heightfield';
 
 /** Tipos de objetivo que puede tener una misión. */
-export type MissionKind = 'walk' | 'sprint' | 'reach' | 'collect' | 'drone' | 'all';
+export type MissionKind =
+  | 'walk'
+  | 'sprint'
+  | 'reach'
+  | 'collect'
+  | 'drone'
+  | 'chop'
+  | 'drive'
+  | 'build'
+  | 'sell'
+  | 'all';
 
 export type ItemKind = 'flower' | 'crystal' | 'relic';
 
@@ -19,6 +29,8 @@ export interface MissionDef {
   title: string;
   hint: string;
   xp: number;
+  /** Recompensa en dinero del juego (además de la XP). */
+  cash?: number;
   goal: number;
   kind: MissionKind;
   icon: string;
@@ -29,7 +41,7 @@ export interface MissionDef {
 }
 
 /** Nº de misiones excluyendo la final. */
-const TOTAL_MISSIONS = 11;
+const TOTAL_MISSIONS = 15;
 
 /** Catálogo de misiones (el orden importa para la activación por oleadas). */
 export const MISSIONS: MissionDef[] = [
@@ -52,6 +64,17 @@ export const MISSIONS: MissionDef[] = [
     kind: 'collect',
     item: 'flower',
     icon: '🌸',
+    requires: []
+  },
+  {
+    id: 'chop1',
+    title: 'Leñador del valle',
+    hint: 'Tala 3 árboles con el hacha (clic izquierdo)',
+    xp: 30,
+    cash: 60,
+    goal: 3,
+    kind: 'chop',
+    icon: '🪓',
     requires: []
   },
   {
@@ -87,6 +110,17 @@ export const MISSIONS: MissionDef[] = [
     requires: ['walk1']
   },
   {
+    id: 'drive1',
+    title: 'Conductor del bosque',
+    hint: 'Sube a un coche del pueblo con F y conducelo',
+    xp: 20,
+    cash: 40,
+    goal: 1,
+    kind: 'drive',
+    icon: '🚗',
+    requires: ['walk1']
+  },
+  {
     id: 'summit1',
     title: 'Hacia la cumbre',
     hint: 'Alcanza la explanada de la cumbre del cerro',
@@ -107,6 +141,28 @@ export const MISSIONS: MissionDef[] = [
     item: 'crystal',
     icon: '💠',
     requires: ['obelisk1']
+  },
+  {
+    id: 'sell1',
+    title: 'Comerciante de madera',
+    hint: 'Vende 10 de madera en el aserradero (E junto a la sierra)',
+    xp: 25,
+    cash: 50,
+    goal: 10,
+    kind: 'sell',
+    icon: '💰',
+    requires: ['chop1']
+  },
+  {
+    id: 'build1',
+    title: 'Constructor novato',
+    hint: 'Construye 5 piezas de tu casa con B',
+    xp: 40,
+    cash: 80,
+    goal: 5,
+    kind: 'build',
+    icon: '🔨',
+    requires: ['chop1']
   },
   {
     id: 'drone1',
@@ -179,6 +235,14 @@ export interface PlayerStats {
   sprinted: number;
   collected: Record<ItemKind, number>;
   playerPos: THREE.Vector3;
+  /** Árboles talados con el hacha. */
+  chopped: number;
+  /** ¿Ya condujo un coche? (1/0). */
+  drove: number;
+  /** Piezas de casa construidas. */
+  built: number;
+  /** Madera vendida en el aserradero. */
+  sold: number;
 }
 
 /** XP necesaria por nivel. */
@@ -277,6 +341,18 @@ export class MissionManager {
           break;
         case 'drone':
           s.progress = stats.playerPos.distanceTo(dronePos) < 9 ? 1 : 0;
+          break;
+        case 'chop':
+          s.progress = Math.min(stats.chopped, def.goal);
+          break;
+        case 'drive':
+          s.progress = stats.drove >= 1 ? 1 : 0;
+          break;
+        case 'build':
+          s.progress = Math.min(stats.built, def.goal);
+          break;
+        case 'sell':
+          s.progress = Math.min(stats.sold, def.goal);
           break;
         case 'all':
           s.progress = this.totalDone;

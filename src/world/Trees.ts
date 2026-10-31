@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Heightfield, WORLD_SIZE } from './heightfield';
+import { Heightfield, WORLD_SIZE, VILLAGE } from './heightfield';
 import { barkTexture, leafClusterTexture } from '../core/textures';
 import { mulberry32, fbm2 } from '../core/noise';
 import { shared } from '../core/uniforms';
@@ -10,6 +10,11 @@ export interface Collider {
   z: number;
   r: number;
 }
+
+/** Golpes de hacha necesarios para talar un árbol. */
+export const TREE_HITS = 3;
+/** Segundos hasta que un árbol talado vuelve a crecer. */
+const TREE_RESPAWN = 150;
 
 /**
  * Niveles de detalle (estilo ez-tree). Cada árbol instanciado se asigna al
@@ -87,6 +92,26 @@ interface Placement {
   z: number;
   /** Desfase del umbral LOD por árbol: evita cambios en masa al cruzarlo. */
   lodBias: number;
+  /** Árbol talado: la instancia no se dibuja hasta que reaparezca. */
+  hidden: boolean;
+  /** Collider del tronco (se encoge al quedar el tocón). */
+  collider: Collider;
+  variant: number;
+  scale: number;
+}
+
+interface FallAnim {
+  group: THREE.Group;
+  axis: THREE.Vector3;
+  t: number;
+  placed: boolean;
+  placement: Placement;
+}
+
+interface RespawnTimer {
+  placement: Placement;
+  stump: THREE.Mesh;
+  at: number;
 }
 
 interface VariantMeshes {
@@ -95,13 +120,35 @@ interface VariantMeshes {
   foliageLods: (THREE.InstancedMesh | null)[];
 }
 
+/** Información de un árbol talado (para dar madera y avisos). */
+export interface FellEvent {
+  x: number;
+  z: number;
+  wood: number;
+}
+
+export interface ForestAPI {
+  group: THREE.Group;
+  colliders: Collider[];
+  update: (camPos: THREE.Vector3, dt?: number, t?: number) => void;
+  /** Árbol vivo más cercano a un punto (para apuntar con el hacha). */
+  nearestTree: (p: THREE.Vector3, maxDist: number) => { placement: Placement; dist: number } | null;
+  /** Tala un árbol concreto: animación de caída + tocón + reprogramado. */
+  fellTree: (placement: Placement) => void;
+  /** Eventos de caída terminada que el Engine drena. */
+  fellEvents: FellEvent[];
+}
+
+/** Placement expuesto (Chopping guarda vida por árbol). */
+export type { Placement as TreePlacement };
+
 /**
  * Bosque procedural instanciado con LOD dinámico por distancia.
  */
 export function createForest(
   field: Heightfield,
   scene: THREE.Scene
-): { group: THREE.Group; colliders: Collider[]; update: (camPos: THREE.Vector3) => void } {
+): ForestAPI {
   const group = new THREE.Group();
   const colliders: Collider[] = [];
   const rng = mulberry32(5150);
@@ -203,6 +250,10 @@ export function createForest(
     const dsx = x - 0;
     const dsz = z - 140;
     if (dsx * dsx + dsz * dsz < 15 * 15) return false;
+    // Claro del pueblo (cabañas, aserradero y coches).
+    const dvx = x - VILLAGE.x;
+    const dvz = z - VILLAGE.z;
+    if (dvx * dvx + dvz * dvz < VILLAGE.r * VILLAGE.r) return false;
     for (const [px, pz, ps] of placedXZ) {
       const dx = x - px;
       const dz = z - pz;
@@ -226,10 +277,21 @@ export function createForest(
       0.9 + rng() * 0.18,
       0.8 + rng() * 0.25
     );
-    byVariant[variant].push({ matrix, color, x, z, lodBias: (rng() - 0.5) * 14 });
-    placedXZ.push([x, z, minSep]);
     const tr = variantGeos[variant].trunkRadius;
-    colliders.push({ x, z, r: Math.max(0.4, tr * scale * 1.4) });
+    const collider: Collider = { x, z, r: Math.max(0.4, tr * scale * 1.4) };
+    byVariant[variant].push({
+      matrix,
+      color,
+      x,
+      z,
+      lodBias: (rng() - 0.5) * 14,
+      hidden: false,
+      collider,
+      variant,
+      scale
+    });
+    placedXZ.push([x, z, minSep]);
+    colliders.push(collider);
   };
 
   // Árboles "héroe" que replican la composición de la referencia.
@@ -301,13 +363,16 @@ export function createForest(
 
   // Reparto de instancias por distancia; se rehace al desplazarse el jugador.
   const lastCam = new THREE.Vector3(Infinity, 0, Infinity);
-  const update = (camPos: THREE.Vector3): void => {
-    if (camPos.distanceToSquared(lastCam) < 36) return;
-    lastCam.copy(camPos);
+  const falls: FallAnim[] = [];
+  const respawns: RespawnTimer[] = [];
+  const fellEvents: FellEvent[] = [];
+  let worldT = 0;
 
+  const redistribute = (camPos: THREE.Vector3): void => {
     for (const variant of variants) {
       const counts = [0, 0, 0];
       for (const p of variant.placements) {
+        if (p.hidden) continue;
         const d = Math.hypot(p.x - camPos.x, p.z - camPos.z) + p.lodBias;
         const level = d < LODS[0].dist ? 0 : d < LODS[1].dist ? 1 : 2;
         const i = counts[level]++;
@@ -332,8 +397,115 @@ export function createForest(
     }
   };
 
+  const update = (camPos: THREE.Vector3, dt = 0, t = 0): void => {
+    worldT = t;
+    if (camPos.distanceToSquared(lastCam) >= 36) {
+      lastCam.copy(camPos);
+      redistribute(camPos);
+    }
+
+    if (dt <= 0) return;
+
+    // --- Caídas en curso: aceleran, golpean el suelo y dejan tocón ---
+    for (let i = falls.length - 1; i >= 0; i--) {
+      const f = falls[i];
+      f.t += dt / 1.35;
+      const k = Math.min(f.t, 1);
+      // ease-in cuadrático: el tronco se acelera al caer.
+      const ang = (k * k) * (Math.PI / 2 - 0.12);
+      f.group.setRotationFromAxisAngle(f.axis, ang);
+      if (!f.placed && f.t >= 0.94) {
+        f.placed = true;
+        // Tocón que queda en el sitio.
+        const stump = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.32 * f.placement.scale, 0.4 * f.placement.scale, 0.55, 9),
+          f.placement.variant < 3 ? bark : deadBark
+        );
+        stump.position.set(
+          f.placement.x,
+          field.sampleHeight(f.placement.x, f.placement.z) + 0.18,
+          f.placement.z
+        );
+        stump.castShadow = true;
+        stump.receiveShadow = true;
+        scene.add(stump);
+        f.placement.collider.r = 0.35;
+        const wood = 4 + Math.floor(Math.random() * 3);
+        fellEvents.push({ x: f.placement.x, z: f.placement.z, wood });
+        respawns.push({ placement: f.placement, stump, at: worldT + TREE_RESPAWN });
+      }
+      if (f.t >= 1) {
+        scene.remove(f.group);
+        falls.splice(i, 1);
+      }
+    }
+
+    // --- Árboles que reaparecen ---
+    for (let i = respawns.length - 1; i >= 0; i--) {
+      const r = respawns[i];
+      if (worldT < r.at) continue;
+      r.placement.hidden = false;
+      r.placement.collider.r = Math.max(0.4, variantGeos[r.placement.variant].trunkRadius * r.placement.scale * 1.4);
+      scene.remove(r.stump);
+      r.stump.geometry.dispose();
+      respawns.splice(i, 1);
+      redistribute(lastCam);
+    }
+  };
+
+  /** Árbol vivo más cercano (para apuntar con el hacha). */
+  const nearestTree = (
+    p: THREE.Vector3,
+    maxDist: number
+  ): { placement: Placement; dist: number } | null => {
+    let best: { placement: Placement; dist: number } | null = null;
+    for (const variant of variants) {
+      for (const pl of variant.placements) {
+        if (pl.hidden) continue;
+        const d = Math.hypot(pl.x - p.x, pl.z - p.z);
+        if (d < maxDist && (!best || d < best.dist)) {
+          best = { placement: pl, dist: d };
+        }
+      }
+    }
+    return best;
+  };
+
+  /** Tala: clona la geometría LOD0 del árbol y lo anima cayendo. */
+  const fellTree = (placement: Placement): void => {
+    if (placement.hidden) return;
+    placement.hidden = true;
+    redistribute(lastCam);
+
+    const geos = variantGeos[placement.variant];
+    const g = new THREE.Group();
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+    placement.matrix.decompose(pos, quat, scl);
+    g.position.copy(pos);
+    g.quaternion.copy(quat);
+    g.scale.copy(scl);
+
+    const trunkMesh = new THREE.Mesh(geos.lods[0].trunk, placement.variant < 3 ? bark : deadBark);
+    trunkMesh.castShadow = true;
+    g.add(trunkMesh);
+    if (geos.lods[0].leaves) {
+      const leafMesh = new THREE.Mesh(geos.lods[0].leaves!, leaves);
+      g.add(leafMesh);
+    }
+
+    // Eje de caída horizontal, alejándose del jugador no hace falta:
+    // basta un rumbo aleatorio estable.
+    const dir = Math.random() * Math.PI * 2;
+    const axis = new THREE.Vector3(Math.cos(dir), 0, -Math.sin(dir)).normalize();
+
+    scene.add(g);
+    falls.push({ group: g, axis, t: 0, placed: false, placement });
+  };
+
   scene.add(group);
-  return { group, colliders, update };
+  return { group, colliders, update, nearestTree, fellTree, fellEvents };
 }
 
 /** Fusión manual de geometrías indexadas con position/normal/uv. */

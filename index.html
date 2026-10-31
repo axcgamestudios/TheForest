@@ -95,6 +95,65 @@
     @keyframes promptPulse { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-3px); } }
     @keyframes kbdPulse { 0%,100% { box-shadow: 0 0 0 rgba(184,212,136,0); } 50% { box-shadow: 0 0 10px rgba(184,212,136,0.45); } }
 
+    /* Recursos: dinero y madera */
+    #resources {
+      position: absolute; top: 16px; right: 16px;
+      display: flex; align-items: center; gap: 14px;
+      padding: 9px 15px; font-size: 0.85rem; letter-spacing: 0.05em;
+    }
+    .res-item { display: flex; align-items: center; gap: 6px; color: #e9f0da; }
+    .res-item b { font-variant-numeric: tabular-nums; font-weight: 700; }
+    .res-money b { color: #ffd98c; }
+    .res-wood b { color: #d9b98c; }
+    .res-sep { width: 1px; height: 16px; background: var(--panel-line); }
+
+    /* Velocímetro al conducir */
+    #speedo {
+      position: absolute; bottom: 15%; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 18px; font-size: 0.9rem; letter-spacing: 0.06em;
+    }
+    #speedo b { font-size: 1.25rem; color: #ffd98c; font-variant-numeric: tabular-nums; }
+
+    /* Barra de construcción */
+    #buildbar {
+      position: absolute; bottom: 23%; left: 50%; transform: translateX(-50%);
+      min-width: 380px; max-width: min(720px, 92vw);
+      padding: 10px 14px 9px; text-align: center;
+    }
+    .bb-head {
+      font-size: 0.62rem; letter-spacing: 0.28em; color: var(--ink-dim);
+      margin-bottom: 7px;
+    }
+    .bb-pieces {
+      display: flex; justify-content: center; gap: 6px; flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .bb-piece {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 9px; border-radius: 5px; font-size: 0.72rem;
+      color: var(--ink-dim);
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+    }
+    .bb-piece b {
+      font-size: 0.62rem; color: #0c1409; background: rgba(184,212,136,0.5);
+      border-radius: 3px; padding: 0 4px;
+    }
+    .bb-piece.sel {
+      color: #eef5e0; border-color: rgba(210,235,170,0.8);
+      background: rgba(110,150,70,0.28);
+    }
+    .bb-sel { font-size: 0.72rem; color: #d7e2c4; letter-spacing: 0.03em; }
+    .bb-sel .ok { color: #9fe8a8; font-style: normal; }
+    .bb-sel .no { color: #ff9f9f; font-style: normal; }
+    .swatch {
+      display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+      vertical-align: -1px; margin: 0 3px; border: 1px solid rgba(255,255,255,0.35);
+    }
+    .bb-hint { font-size: 0.68rem; color: var(--ink-faint); margin-left: 10px; }
+    #buildbar kbd { padding: 0.08rem 0.32rem; font-size: 0.62rem; }
+
     #xpwrap {
       position: absolute; bottom: 16px; left: 16px;
       display: flex; align-items: center; gap: 10px;
@@ -127,6 +186,9 @@
     .toast-mission .toast-ic { background: rgba(110,200,120,0.2); color: #9fe8a8; }
     .toast-level .toast-ic { background: rgba(255,206,110,0.18); color: #ffd98c; }
     .toast-item .toast-ic { background: rgba(140,215,255,0.15); color: #9fd8ff; }
+    .toast-cash .toast-ic { background: rgba(255,206,110,0.2); color: #ffd98c; }
+    .toast-wood .toast-ic { background: rgba(200,150,100,0.22); color: #d9b98c; }
+    .toast-build .toast-ic { background: rgba(150,180,220,0.18); color: #b9d0f0; }
     .toast-t { font-size: 0.8rem; font-weight: 650; color: #eef3e2; }
     .toast-s { font-size: 0.7rem; color: var(--ink-dim); margin-top: 1px; }
     @keyframes toastIn { from { opacity: 0; transform: translateX(36px); } to { opacity: 1; transform: none; } }
@@ -405,10 +467,17 @@
   <div id="hud" class="hidden">
     <canvas id="compass"></canvas>
     <div id="tracker" class="hud-card"></div>
-    <div id="prompt" class="hud-card hidden"><kbd>E</kbd><span id="promptText"></span></div>
+    <div id="resources" class="hud-card">
+      <span class="res-item res-money">💰 <b id="resMoney">$80</b></span>
+      <span class="res-sep"></span>
+      <span class="res-item res-wood">🪵 <b id="resWood">0</b></span>
+    </div>
+    <div id="prompt" class="hud-card hidden"><kbd id="promptKey">E</kbd><span id="promptText"></span></div>
+    <div id="speedo" class="hud-card hidden"><b id="speedVal">0</b><span>km/h</span><kbd>F</kbd><span>bajar</span></div>
+    <div id="buildbar" class="hud-card hidden"></div>
     <div id="xpwrap" class="hud-card"><span id="xpLevel">NV 1</span><div id="xpBar"><div id="xpFill" style="width:0%"></div></div></div>
     <div id="toasts"></div>
-    <div id="hint">WASD moverse &middot; Shift correr &middot; Espacio saltar &middot; E recoger &middot; Esc men&uacute;</div>
+    <div id="hint">WASD moverse &middot; Shift correr &middot; E recoger/vender &middot; F coche &middot; B construir &middot; Clic talar &middot; Esc men&uacute;</div>
   </div>
 
   <!-- ==================== PANTALLA DE CARGA ==================== -->
@@ -459,7 +528,7 @@
     <div id="pauseBadge" class="hidden">EN PAUSA</div>
 
     <div class="menu-footer">
-      <span>v1.1 &middot; <span id="misCounter">0/12</span> misiones &middot; calidad <span id="qLabel">media</span></span>
+      <span>v1.2 &middot; <span id="misCounter">0/16</span> misiones &middot; calidad <span id="qLabel">media</span></span>
       <span>Creado por <a href="https://github.com/jalexiscv" target="_blank" rel="noopener">Jose Alexis Correa Valencia</a> &middot; @jalexiscv &middot; Colombia</span>
     </div>
   </div>
@@ -471,10 +540,15 @@
       <h2>CONTROLES</h2>
       <p class="p-sub">C&Oacute;MO CAMINAR POR EL BOSQUE</p>
       <div class="ctrl-grid">
-        <span class="k"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span class="a">Caminar</span>
+        <span class="k"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span class="a">Caminar (y conducir)</span>
         <span class="k"><kbd>Shift</kbd></span><span class="a">Correr (la c&aacute;mara se abre al sprint)</span>
-        <span class="k"><kbd>Espacio</kbd></span><span class="a">Saltar</span>
-        <span class="k"><kbd>E</kbd></span><span class="a">Recoger objetos (flores, cristales, reliquias)</span>
+        <span class="k"><kbd>Espacio</kbd></span><span class="a">Saltar / freno de mano en el coche</span>
+        <span class="k"><kbd>E</kbd></span><span class="a">Recoger objetos &middot; vender madera en el aserradero</span>
+        <span class="k"><kbd>Clic izq.</kbd></span><span class="a">Talar &aacute;rboles con el hacha</span>
+        <span class="k"><kbd>F</kbd></span><span class="a">Subir / bajar de los coches del pueblo</span>
+        <span class="k"><kbd>B</kbd></span><span class="a">Modo construcci&oacute;n de tu casa</span>
+        <span class="k"><kbd>1</kbd>&ndash;<kbd>5</kbd> <kbd>R</kbd> <kbd>T</kbd> <kbd>Y</kbd></span><span class="a">Elegir pieza &middot; rotar &middot; madera/piedra &middot; color</span>
+        <span class="k"><kbd>X</kbd></span><span class="a">Demoler (devuelve la mitad del coste)</span>
         <span class="k"><kbd>Esc</kbd></span><span class="a">Pausa / men&uacute;</span>
         <span class="k"><kbd>Rat&oacute;n</kbd></span><span class="a">Mirar alrededor</span>
       </div>

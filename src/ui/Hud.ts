@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { MissionManager, MissionDef, ItemKind } from '../game/Missions';
 import { Collectibles } from '../game/Collectibles';
 import { FirstPersonController } from '../player/FirstPersonController';
+import { Economy } from '../game/Economy';
+import { Vehicles } from '../game/Vehicles';
+import { Builder, PIECES, PIECE_ORDER, PALETTE } from '../game/Builder';
+import { Chopping } from '../game/Chopping';
+import { SAWMILL } from '../world/heightfield';
 
 /** Rumbos dibujados en la cinta de la brújula. */
 const CARDINALS: { a: number; label: string }[] = [
@@ -26,8 +31,9 @@ const ITEM_ICON: Record<ItemKind, string> = {
 
 /**
  * HUD durante el juego: brújula con marcadores de misión, rastreador de
- * misiones activas, prompt de recogida (E), barra de XP/nivel y avisos
- * emergentes (misiones, niveles, objetos).
+ * misiones activas, recursos (dinero y madera), prompt contextual
+ * (recoger / conducir / construir / vender / talar), velocímetro al
+ * conducir, barra de construcción y avisos emergentes.
  */
 export class Hud {
   private readonly root: HTMLElement;
@@ -35,33 +41,51 @@ export class Hud {
   private readonly ctx2d: CanvasRenderingContext2D;
   private readonly tracker: HTMLElement;
   private readonly prompt: HTMLElement;
+  private readonly promptKey: HTMLElement;
   private readonly promptText: HTMLElement;
   private readonly xpFill: HTMLElement;
   private readonly xpLevel: HTMLElement;
   private readonly toasts: HTMLElement;
+  private readonly resMoney: HTMLElement;
+  private readonly resWood: HTMLElement;
+  private readonly speedo: HTMLElement;
+  private readonly speedVal: HTMLElement;
+  private readonly buildbar: HTMLElement;
 
   private readonly tmpVec = new THREE.Vector3();
   private trackerRefresh = 0;
-  private lastPromptLabel = '';
+  private lastPrompt = '';
   private lastLevel = -1;
   private lastXpPct = -1;
+  private lastMoney = -1;
+  private lastWood = -1;
 
   constructor(
     private readonly missions: MissionManager,
     private readonly collectibles: Collectibles,
     private readonly controller: FirstPersonController,
     private readonly getDronePos: () => THREE.Vector3,
-    private readonly camera: THREE.PerspectiveCamera
+    private readonly camera: THREE.PerspectiveCamera,
+    private readonly economy: Economy,
+    private readonly vehicles: Vehicles,
+    private readonly builder: Builder,
+    private readonly chopping: Chopping
   ) {
     this.root = document.getElementById('hud')!;
     this.compass = document.getElementById('compass') as HTMLCanvasElement;
     this.ctx2d = this.compass.getContext('2d')!;
     this.tracker = document.getElementById('tracker')!;
     this.prompt = document.getElementById('prompt')!;
+    this.promptKey = document.getElementById('promptKey')!;
     this.promptText = document.getElementById('promptText')!;
     this.xpFill = document.getElementById('xpFill')!;
     this.xpLevel = document.getElementById('xpLevel')!;
     this.toasts = document.getElementById('toasts')!;
+    this.resMoney = document.getElementById('resMoney')!;
+    this.resWood = document.getElementById('resWood')!;
+    this.speedo = document.getElementById('speedo')!;
+    this.speedVal = document.getElementById('speedVal')!;
+    this.buildbar = document.getElementById('buildbar')!;
 
     this.resizeCompass();
     window.addEventListener('resize', () => this.resizeCompass());
@@ -87,11 +111,23 @@ export class Hud {
   }
 
   /** Aviso emergente a la derecha. */
-  toast(kind: 'mission' | 'new' | 'level' | 'item', title: string, sub: string): void {
+  toast(kind: 'mission' | 'new' | 'level' | 'item' | 'cash' | 'wood' | 'build', title: string, sub: string): void {
     const el = document.createElement('div');
     el.className = `toast toast-${kind}`;
     const icon =
-      kind === 'mission' ? '✓' : kind === 'new' ? '◈' : kind === 'level' ? '★' : '+';
+      kind === 'mission'
+        ? '✓'
+        : kind === 'new'
+          ? '◈'
+          : kind === 'level'
+            ? '★'
+            : kind === 'cash'
+              ? '💰'
+              : kind === 'wood'
+                ? '🪵'
+                : kind === 'build'
+                  ? '🔨'
+                  : '+';
     el.innerHTML = `<span class="toast-ic">${icon}</span><div><div class="toast-t">${title}</div><div class="toast-s">${sub}</div></div>`;
     this.toasts.appendChild(el);
     while (this.toasts.children.length > 4) this.toasts.firstChild?.remove();
@@ -104,19 +140,59 @@ export class Hud {
   update(dt: number): void {
     this.drawCompass();
 
-    // --- Rastreador de misiones (refresco a 4 Hz, evita reflow constante) ---
+    // --- Rastreador y barra de construcción (refresco a 4 Hz) ---
     this.trackerRefresh -= dt;
     if (this.trackerRefresh <= 0) {
       this.trackerRefresh = 0.25;
       this.renderTracker();
+      this.renderBuildBar();
     }
 
-    // --- Prompt de recogida ---
-    const near = this.collectibles.nearest;
-    const label = near ? `Recoger ${near.label}` : '';
-    if (label !== this.lastPromptLabel) {
-      this.lastPromptLabel = label;
-      if (label) {
+    // --- Recursos: dinero y madera ---
+    if (this.economy.money !== this.lastMoney) {
+      this.lastMoney = this.economy.money;
+      this.resMoney.textContent = `$${this.economy.money}`;
+    }
+    if (this.economy.wood !== this.lastWood) {
+      this.lastWood = this.economy.wood;
+      this.resWood.textContent = `${this.economy.wood}`;
+    }
+
+    // --- Velocímetro ---
+    if (this.vehicles.isDriving) {
+      this.speedo.classList.remove('hidden');
+      this.speedVal.textContent = String(Math.round(this.vehicles.speedKmh));
+    } else {
+      this.speedo.classList.add('hidden');
+    }
+
+    // --- Prompt contextual (prioridad) ---
+    let key = '';
+    let label = '';
+    if (this.vehicles.isDriving) {
+      key = 'F';
+      label = 'bajar del coche';
+    } else if (this.vehicles.nearest(this.controller.position)) {
+      key = 'F';
+      label = 'subir al coche';
+    } else if (this.economy.wood > 0 && this.nearSawmill()) {
+      key = 'E';
+      label = `vender ${this.economy.wood} de madera (+$${this.economy.wood * 5})`;
+    } else {
+      const near = this.collectibles.nearest;
+      if (near) {
+        key = 'E';
+        label = `Recoger ${near.label}`;
+      } else if (this.chopping.aimedTree()) {
+        key = '🖱';
+        label = 'Talar el árbol';
+      }
+    }
+    const combo = key + label;
+    if (combo !== this.lastPrompt) {
+      this.lastPrompt = combo;
+      if (key) {
+        this.promptKey.textContent = key;
         this.promptText.textContent = label;
         this.prompt.classList.remove('hidden');
       } else {
@@ -132,6 +208,11 @@ export class Hud {
       this.xpLevel.textContent = `NV ${this.missions.levelNumber}`;
       this.xpFill.style.width = `${pct}%`;
     }
+  }
+
+  private nearSawmill(): boolean {
+    const p = this.controller.position;
+    return Math.hypot(p.x - SAWMILL.x, p.z - SAWMILL.z) < SAWMILL.r + 2;
   }
 
   private renderTracker(): void {
@@ -153,6 +234,51 @@ export class Hud {
     this.tracker.innerHTML = html;
   }
 
+  /** Barra de construcción (visible sólo en modo construcción). */
+  private renderBuildBar(): void {
+    if (!this.builder.active) {
+      this.buildbar.classList.add('hidden');
+      return;
+    }
+    this.buildbar.classList.remove('hidden');
+
+    if (this.builder.deleteMode) {
+      this.buildbar.innerHTML = `
+        <div class="bb-head">DEMOLER</div>
+        <div class="bb-body">
+          <span class="bb-sel">Cerca de ti · devuelve 50% del coste</span>
+          <span class="bb-hint"><kbd>X</kbd> volver a construir · <kbd>B</kbd> salir</span>
+        </div>`;
+      return;
+    }
+
+    const sel = this.builder.selectedType;
+    const style = this.builder.selectedStyle;
+    const colorIdx = this.builder.selectedColor;
+    const def = PIECES[sel];
+    const extra = style === 'stone' ? 10 : 0;
+    const afford = this.economy.canAfford(def.wood, def.cash + extra);
+
+    let pieces = '';
+    PIECE_ORDER.forEach((t, i) => {
+      const d = PIECES[t];
+      pieces += `<span class="bb-piece${t === sel ? ' sel' : ''}"><b>${i + 1}</b>${d.icon} ${d.name}</span>`;
+    });
+
+    this.buildbar.innerHTML = `
+      <div class="bb-head">CONSTRUIR · <kbd>B</kbd> salir</div>
+      <div class="bb-pieces">${pieces}</div>
+      <div class="bb-body">
+        <span class="bb-sel">
+          ${def.name} ·
+          <i class="${afford ? 'ok' : 'no'}">🪵 ${def.wood} + $${def.cash + extra}</i>
+           · <kbd>T</kbd> ${style === 'wood' ? 'madera' : 'piedra'}
+           · <kbd>Y</kbd> <i class="swatch" style="background:#${PALETTE[colorIdx].hex.toString(16).padStart(6, '0')}"></i>${PALETTE[colorIdx].name}
+           · <kbd>R</kbd> rotar · <kbd>X</kbd> demoler
+        </span>
+      </div>`;
+  }
+
   /** Marcadores de brújula según misiones activas. */
   private compassMarkers(): { pos: THREE.Vector3; label: string; color: string }[] {
     const out: { pos: THREE.Vector3; label: string; color: string }[] = [];
@@ -165,6 +291,13 @@ export class Hud {
       } else if (def.kind === 'collect' && def.item) {
         const p = this.collectibles.nearestOfKind(def.item);
         if (p) out.push({ pos: p.clone(), label: `${ITEM_ICON[def.item]}`, color: '#9fe8ff' });
+      } else if (def.kind === 'drive') {
+        // Coche más cercano (uno fijo del pueblo como referencia).
+        this.tmpVec.set(58, 0, 124);
+        out.push({ pos: this.tmpVec.clone(), label: '🚗', color: '#a8e8c8' });
+      } else if (def.kind === 'sell') {
+        this.tmpVec.set(SAWMILL.x, 0, SAWMILL.z);
+        out.push({ pos: this.tmpVec.clone(), label: '💰', color: '#ffd98c' });
       }
     }
     return out.slice(0, 4);

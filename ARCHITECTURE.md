@@ -416,3 +416,80 @@ Los errores reales del desarrollo, para no repetirlos:
    siempre un servidor HTTP.
 10. **Objetivos de sombra que siguen al jugador**: anclar a la cuadrícula de
     texels del shadow map o los bordes de sombra tiemblan al caminar.
+
+---
+
+## 13. Pueblo, vehículos, tala y construcción (v1.2)
+
+**Archivos:** [src/world/Structures.ts](src/world/Structures.ts),
+[src/game/Vehicles.ts](src/game/Vehicles.ts),
+[src/game/Chopping.ts](src/game/Chopping.ts),
+[src/game/Builder.ts](src/game/Builder.ts),
+[src/game/Economy.ts](src/game/Economy.ts),
+[src/player/Hands.ts](src/player/Hands.ts)
+
+### 13.1 El pueblo
+
+`createStructures` levanta el pueblo del valle (claro definido por `VILLAGE`
+en heightfield.ts; árboles y rocas lo evitan en su scatter). Las cabañas son
+**geometrías fusionadas por color de vértice**: cada tronco/caja/piedra
+declara un `userData.tint` y `mergeTinted` lo hornea a colores de vértice —
+un solo draw call por edificio, con sombras. La colisión se aproxima con
+**círculos cada 1.1 m a lo largo de los muros** (hueco en la puerta), lo que
+reusa el sistema de colisores circulares del controlador sin añadir un motor
+de física. La cabaña se ancla a la esquina de terreno más baja de su huella.
+
+### 13.2 Coches
+
+`Vehicles` crea 3 coches procedurales (pickup/SUV/compacto, cada uno con
+carrocería, cristales, faros emisivos, ruedas con pivotes de dirección e
+interior con volante). La física es un modelo de bicicleta simplificado:
+aceleración/freno/reversa con rodadura, `yaw += v/wheelBase · tan(δ)`, y
+**actitud sobre el terreno** muestreando la altura en 4 puntos (cabeceo y
+alabeo amortiguados). La colisión prueba el frontal y la trasera contra los
+círculos del mundo y expulsa el coche. La cámara viaja en el asiento del
+conductor: `camera.quaternion = coche · (mirada relativa)`, así se puede
+mirar alrededor mientras se conduce. El motor es una sierra + subarmónico
+filtrados cuyo tono sigue |v| (`AudioSystem.setEngine`).
+
+*Gotcha:* los coches aportan un collider "vivo" al array compartido (se
+muta x/z cada frame) — el coche que conduce se salta el suyo propio.
+
+### 13.3 Tala
+
+Cada árbol del bosque instanciado tiene un `Placement` con collider y flag
+`hidden`. Al talar: el placement se oculta, el reparto LOD se fuerza, y un
+**clon LOD0 del árbol** (misma geometría y material) cae rotando alrededor de
+la base con ease-in cuadrático; al tocar deja un tocón, encoge el collider a
+0.35 m y emite madera; a los 150 s reaparece. El hacha son las manos en
+primera persona (`Hands`): la palma, dedos con 3 falanges y pulgar están
+moldeados con `RoundedBoxGeometry` y pivotes en las articulaciones; el golpe
+(armado → impacto → recuperación) dispara el callback de daño en el instante
+exacto del impacto.
+
+*Gotcha:* **la cámara debe colgar de la escena** (`scene.add(camera)`) para
+que sus hijas (las manos) se dibujen.
+
+### 13.4 Construcción y economía
+
+`Builder` es un modo edición con fantasma: la pieza se precolorea con el
+color elegido (verde/rojo según solvencia), se ajusta a una rejilla de 0.5 m
+y su altura busca apoyo en el terreno o en piezas previas (apilar muros,
+techos). Cinco piezas (tarima, pared, puerta con hueco cruzable, ventana,
+techo a dos aguas) × 2 estilos (madera/piedra) × 7 colores; demoler devuelve
+la mitad. Todo persiste en `localStorage` (`tf-house-v1`), igual que la
+economía (`tf-economy-v1`: dinero, madera, vendido). La madera se vende en
+el aserradero con E ($5/u) y las misiones pagan dinero (`cash` en
+`MissionDef`).
+
+### 13.5 God rays
+
+`GodRaysEffect` de postprocessing con un **disco solar** (esfera básica sin
+niebla) que sigue al jugador a 1500 m en la dirección del sol. La occlusión
+es la del depth buffer real: los árboles y el terreno recortan los haces.
+Activos en calidad media/alta.
+
+*Gotcha central:* el composer exige `composer.setMainScene(scene)` y
+`setMainCamera(camera)` — sin eso el efecto existe pero su buffer de luz
+queda negro (el DepthMaskPass no conoce la escena) y no hay ningún error por
+consola.

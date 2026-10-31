@@ -29,8 +29,8 @@ export class FirstPersonController {
   sprintDistance = 0;
   jumps = 0;
 
-  private yaw = Math.PI; // mirando hacia -Z... (yaw 0 mira a -Z; PI mira a +Z)
-  private pitch = 0;
+  private mYaw = Math.PI; // mirando hacia -Z... (yaw 0 mira a -Z; PI mira a +Z)
+  private mPitch = 0;
   private readonly velocity = new THREE.Vector3();
   private grounded = true;
   private readonly keys = new Set<string>();
@@ -40,6 +40,9 @@ export class FirstPersonController {
   private camDip = 0;
   private camDipVel = 0;
 
+  /** Momento (s) de la última recogida con E, para el gesto de las manos. */
+  lastPickup = -10;
+
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly field: Heightfield,
@@ -48,8 +51,8 @@ export class FirstPersonController {
   ) {
     this.position = spawn.clone();
     this.position.y = field.sampleHeight(spawn.x, spawn.z) + EYE_HEIGHT;
-    this.yaw = 0; // three: yaw 0 => cámara mira hacia -Z (ladera arriba)
-    this.pitch = 0.02;
+    this.mYaw = 0; // three: yaw 0 => cámara mira hacia -Z (ladera arriba)
+    this.mPitch = 0.02;
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') e.preventDefault();
@@ -57,11 +60,13 @@ export class FirstPersonController {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('mousemove', (e) => {
-      if (!this.enabled) return;
-      this.yaw -= e.movementX * 0.0021;
-      this.pitch -= e.movementY * 0.0021;
+      // La mirada funciona siempre que el puntero esté bloqueado, incluso
+      // conduciendo (enabled = false) o en el menú (la cámara se impone).
+      if (!document.pointerLockElement) return;
+      this.mYaw -= e.movementX * 0.0021;
+      this.mPitch -= e.movementY * 0.0021;
       const lim = Math.PI / 2 - 0.06;
-      this.pitch = THREE.MathUtils.clamp(this.pitch, -lim, lim);
+      this.mPitch = THREE.MathUtils.clamp(this.mPitch, -lim, lim);
     });
 
     this.camera.fov = MENU_FOV;
@@ -77,6 +82,65 @@ export class FirstPersonController {
     return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
   }
 
+  /** Teclas pulsadas ahora mismo (para conducir). */
+  get pressedKeys(): Set<string> {
+    return this.keys;
+  }
+
+  /** Yaw de mirada (rad). 0 mira a -Z. */
+  get yaw(): number {
+    return this.mYaw;
+  }
+
+  set yaw(v: number) {
+    this.mYaw = v;
+  }
+
+  /** Pitch de mirada (rad). */
+  get pitch(): number {
+    return this.mPitch;
+  }
+
+  set pitch(v: number) {
+    this.mPitch = v;
+  }
+
+  /** Fase del head-bob (para las manos). */
+  get bobPhase(): number {
+    return this.bobTime;
+  }
+
+  /** Intensidad del head-bob (para las manos). */
+  get bobIntensity(): number {
+    return this.bobAmount;
+  }
+
+  /** Dirección horizontal de mirada (sin bob). */
+  getViewDir(target: THREE.Vector3): THREE.Vector3 {
+    return target.set(-Math.sin(this.mYaw), 0, -Math.cos(this.mYaw)).normalize();
+  }
+
+  /** Ajusta el yaw para mirar en una dirección dada (al subir al coche). */
+  alignYawTo(dir: THREE.Vector3): void {
+    this.mYaw = Math.atan2(-dir.x, -dir.z);
+  }
+
+  /** Envuelve un ángulo a (-PI, PI]. */
+  wrapAngle(a: number): number {
+    return Math.atan2(Math.sin(a), Math.cos(a));
+  }
+
+  /** Anula la velocidad (al bajar del coche). */
+  zeroVelocity(): void {
+    this.velocity.set(0, 0, 0);
+    this.grounded = true;
+  }
+
+  /** Empujón vertical de cámara (impactos del hacha). */
+  addImpulse(v: number): void {
+    this.camDipVel += v;
+  }
+
   /** Velocidad horizontal actual (m/s). */
   get horizontalSpeed(): number {
     return Math.hypot(this.velocity.x, this.velocity.z);
@@ -84,13 +148,13 @@ export class FirstPersonController {
 
   /** Orientación de vista actual (sin bob), para la transición del menú. */
   getViewQuaternion(target: THREE.Quaternion): THREE.Quaternion {
-    return target.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+    return target.setFromEuler(new THREE.Euler(this.mPitch, this.mYaw, 0, 'YXZ'));
   }
 
   update(dt: number): void {
     this.landingSpeed = 0;
     // Dirección de movimiento en el plano XZ según el yaw.
-    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const forward = new THREE.Vector3(-Math.sin(this.mYaw), 0, -Math.cos(this.mYaw));
     const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
     const input = new THREE.Vector3();
@@ -187,11 +251,11 @@ export class FirstPersonController {
     const dip = -Math.abs(Math.min(this.camDip, 0)) - Math.max(this.camDip, 0) * 0.4;
 
     this.camera.position.set(
-      this.position.x + bobX * Math.cos(this.yaw),
+      this.position.x + bobX * Math.cos(this.mYaw),
       this.position.y + bobY + breathe + dip,
-      this.position.z - bobX * Math.sin(this.yaw)
+      this.position.z - bobX * Math.sin(this.mYaw)
     );
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, roll, 'YXZ'));
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.mPitch, this.mYaw, roll, 'YXZ'));
 
     // --- FOV: kick al correr, se relaja al parar ---
     // (el estado vive en camera.fov para no pisar el FOV del menú)

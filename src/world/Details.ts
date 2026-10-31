@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Heightfield, WORLD_SIZE } from './heightfield';
+import { Heightfield, WORLD_SIZE, VILLAGE } from './heightfield';
 import { barkTexture, softDotTexture } from '../core/textures';
 import { mulberry32, fbm2, noise2 } from '../core/noise';
 import { mergeGeos, Collider } from './Trees';
@@ -74,6 +74,8 @@ export function createRocks(field: Heightfield, scene: THREE.Scene, colliders: C
     const z = (rng() * 2 - 1) * (WORLD_SIZE / 2 - 25);
     if (field.sampleHeight(x, z) > 60) continue;
     if (field.distToPath(x, z) < 2.5) continue;
+    // Ni dentro del pueblo (cabañas y coches).
+    if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.r - 8) continue;
     const slopeBias = field.sampleSlope(x, z) > 0.3 ? 1.6 : 0.6;
     if (rng() > 0.5 * slopeBias) continue;
     lists[Math.floor(rng() * 2)].push({ x, z, s: 0.35 + rng() * 1.3, rot: rng() * Math.PI * 2 });

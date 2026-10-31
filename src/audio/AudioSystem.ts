@@ -22,6 +22,12 @@ export class AudioSystem {
   private readonly lastPos = new THREE.Vector3();
   private firstFrame = true;
 
+  // Motor del coche.
+  private engineOsc: OscillatorNode | null = null;
+  private engineGain: GainNode | null = null;
+  private engineFilter: BiquadFilterNode | null = null;
+  private engineOsc2: OscillatorNode | null = null;
+
   constructor(
     private readonly field: Heightfield,
     private readonly controller: FirstPersonController
@@ -78,10 +84,149 @@ export class AudioSystem {
     this.master.gain.setTargetAtTime(inMenu ? 0.06 : 0.55, t, 0.4);
   }
 
-  /** Motivos cortos para eventos de juego (recogida, misión, nivel, UI). */
-  playEvent(kind: 'pickup' | 'mission' | 'level' | 'ui'): void {
+  /** Motivos cortos para eventos de juego (recogida, misión, nivel, UI…). */
+  playEvent(kind: 'pickup' | 'mission' | 'level' | 'ui' | 'chop' | 'fall' | 'cash' | 'hammer' | 'deny' | 'door'): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const ctx = this.ctx;
+
+    if (kind === 'chop') {
+      // Golpe seco de hacha: crujido de madera + golpe grave.
+      const t = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+      g.connect(this.master);
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(160, t);
+      osc.frequency.exponentialRampToValueAtTime(64, t + 0.09);
+      const og = ctx.createGain();
+      og.gain.value = 0.9;
+      osc.connect(og).connect(g);
+      osc.start(t);
+      osc.stop(t + 0.16);
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = 0.7;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 900 + Math.random() * 300;
+      bp.Q.value = 1.1;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.7, t);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      src.connect(bp).connect(ng).connect(g);
+      src.start(t, Math.random());
+      src.stop(t + 0.12);
+      return;
+    }
+
+    if (kind === 'fall') {
+      // Caída del árbol: retumbo grave + crujido largo.
+      const t = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.55, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+      g.connect(this.master);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(70, t);
+      osc.frequency.exponentialRampToValueAtTime(34, t + 0.7);
+      osc.connect(g);
+      osc.start(t);
+      osc.stop(t + 1.1);
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = 0.35;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 340;
+      src.connect(lp).connect(g);
+      src.start(t, Math.random());
+      src.stop(t + 1.0);
+      return;
+    }
+
+    if (kind === 'cash') {
+      // Monedas: dos destellos agudos.
+      const t0 = ctx.currentTime + 0.01;
+      for (const [f, dt, d] of [
+        [1245, 0, 0.09],
+        [1660, 0.07, 0.14]
+      ] as const) {
+        const osc = ctx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.value = f;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.055, t0 + dt + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0008, t0 + dt + d);
+        osc.connect(g).connect(this.master);
+        osc.start(t0 + dt);
+        osc.stop(t0 + dt + d + 0.03);
+      }
+      return;
+    }
+
+    if (kind === 'hammer') {
+      // Martillazo al colocar una pieza.
+      const t = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.4, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      g.connect(this.master);
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(210, t);
+      osc.frequency.exponentialRampToValueAtTime(88, t + 0.1);
+      osc.connect(g);
+      osc.start(t);
+      osc.stop(t + 0.2);
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1500;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.4, t);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+      src.connect(bp).connect(ng).connect(g);
+      src.start(t, Math.random());
+      src.stop(t + 0.09);
+      return;
+    }
+
+    if (kind === 'deny') {
+      const t = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = 140;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.05, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.connect(g).connect(this.master);
+      osc.start(t);
+      osc.stop(t + 0.2);
+      return;
+    }
+
+    if (kind === 'door') {
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = 0.5;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 480;
+      bp.Q.value = 2.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.28, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      src.connect(bp).connect(g).connect(this.master);
+      src.start(t, Math.random());
+      src.stop(t + 0.4);
+      return;
+    }
 
     const notes: { f: number; t: number; d: number; g: number; type?: OscillatorType }[] =
       kind === 'pickup'
@@ -116,6 +261,51 @@ export class AudioSystem {
       osc.connect(g).connect(this.master);
       osc.start(t0 + n.t);
       osc.stop(t0 + n.t + n.d + 0.05);
+    }
+  }
+
+  /**
+   * Motor del coche: sierra + subarmónico filtrados, tono ligado a la
+   * velocidad. `on` arranca/parra; `speed01` 0..1 fija el régimen.
+   */
+  setEngine(on: boolean, speed01: number): void {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+    if (on && !this.engineOsc) {
+      this.engineOsc = ctx.createOscillator();
+      this.engineOsc.type = 'sawtooth';
+      this.engineOsc2 = ctx.createOscillator();
+      this.engineOsc2.type = 'square';
+      this.engineFilter = ctx.createBiquadFilter();
+      this.engineFilter.type = 'lowpass';
+      this.engineFilter.frequency.value = 320;
+      this.engineFilter.Q.value = 1.4;
+      this.engineGain = ctx.createGain();
+      this.engineGain.gain.value = 0;
+      this.engineOsc.connect(this.engineFilter);
+      this.engineOsc2.connect(this.engineFilter);
+      this.engineFilter.connect(this.engineGain).connect(this.master);
+      this.engineOsc.start();
+      this.engineOsc2.start();
+      this.engineGain.gain.setTargetAtTime(0.16, ctx.currentTime, 0.25);
+    } else if (!on && this.engineOsc) {
+      const osc = this.engineOsc;
+      const osc2 = this.engineOsc2!;
+      const gain = this.engineGain!;
+      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.2);
+      osc.stop(ctx.currentTime + 0.9);
+      osc2.stop(ctx.currentTime + 0.9);
+      this.engineOsc = null;
+      this.engineOsc2 = null;
+      this.engineGain = null;
+      this.engineFilter = null;
+    }
+    if (this.engineOsc && this.engineFilter) {
+      const f = 52 + speed01 * 150;
+      this.engineOsc.frequency.setTargetAtTime(f, ctx.currentTime, 0.08);
+      this.engineOsc2!.frequency.setTargetAtTime(f * 0.5, ctx.currentTime, 0.08);
+      this.engineFilter.frequency.setTargetAtTime(260 + speed01 * 900, ctx.currentTime, 0.1);
+      this.engineGain?.gain.setTargetAtTime(0.13 + speed01 * 0.08, ctx.currentTime, 0.15);
     }
   }
 

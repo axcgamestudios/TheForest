@@ -20,10 +20,12 @@ const RING_C = 264; // circunferencia del anillo de progreso
 
 const TIPS = [
   'Consejo: mantén Shift para correr entre la hierba',
-  'Consejo: las flores luminosas se recogen con la tecla E',
+  'Consejo: tala árboles con el hacha (clic izquierdo) y gana madera',
+  'Consejo: sube a los coches del pueblo con F y da una vuelta',
+  'Consejo: vende la madera en el aserradero (tecla E junto a la sierra)',
+  'Consejo: pulsa B y construye tu propia casa con materiales y dinero',
   'Consejo: la brújula marca tus misiones activas',
   'Consejo: el dron patrulla la cumbre… acércate si te atreves',
-  'Consejo: los fragmentos de cristal brillan en la ladera alta',
   'Consejo: cambia la calidad en el menú si va lento'
 ];
 
@@ -55,6 +57,7 @@ function renderMissionPanel(engine: Engine): void {
       state.active && def.goal > 1
         ? ` <span class="mis-xp">· ${Math.floor(state.progress)}/${def.goal}</span>`
         : '';
+    const cash = def.cash ? ` <span class="mis-xp">· $${def.cash}</span>` : '';
     html += `
       <div class="mis-item ${cls}">
         <span class="mis-ic">${state.done ? '✓' : def.icon}</span>
@@ -62,7 +65,7 @@ function renderMissionPanel(engine: Engine): void {
           <div class="mis-t">${def.title}</div>
           <div class="mis-h">${def.hint}</div>
         </div>
-        <span class="mis-xp">+${def.xp} XP${prog}</span>
+        <span class="mis-xp">+${def.xp} XP${cash}${prog}</span>
         <span class="mis-state">${stateLabel}</span>
       </div>`;
   }
@@ -100,7 +103,11 @@ async function bootApp(): Promise<void> {
     engine.collectibles,
     engine.controller,
     () => engine.dronePosition,
-    engine.camera
+    engine.camera,
+    engine.economy,
+    engine.vehicles,
+    engine.builder,
+    engine.chopping
   );
   engine.setHud(hud);
 

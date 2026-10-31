@@ -6,10 +6,13 @@ import { CLOUD_GLSL, CLOUD_HEIGHT, CLOUD_SCALE } from '../core/cloudGlsl';
 /**
  * Cielo procedural (shader Sky), sol direccional con sombras
  * e iluminación ambiental IBL generada desde el propio cielo.
+ * Incluye el disco solar usado por el efecto de rayos volumétricos.
  */
 export class SkyEnv {
   readonly sunDir: THREE.Vector3;
   readonly sun: THREE.DirectionalLight;
+  /** Disco solar brillante (para god rays); sigue al jugador. */
+  readonly sunMesh: THREE.Mesh;
   private readonly shadowExtent = 75;
   private clouds!: THREE.Mesh;
 
@@ -30,9 +33,19 @@ export class SkyEnv {
     const u = sky.material.uniforms;
     u.turbidity.value = 2.6;
     u.rayleigh.value = 1.3;
-    u.mieCoefficient.value = 0.0035;
-    u.mieDirectionalG.value = 0.8;
+    u.mieCoefficient.value = 0.0042;
+    u.mieDirectionalG.value = 0.82;
     u.sunPosition.value.copy(this.sunDir);
+
+    // Disco solar: esfera emisiva lejos en la dirección del sol (sin niebla
+    // para que no se apague con la distancia). Los rayos volumétricos del
+    // postproceso nacen de él.
+    this.sunMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(34, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c9, fog: false })
+    );
+    this.sunMesh.frustumCulled = false;
+    scene.add(this.sunMesh);
 
     // IBL: renderizar el cielo a un PMREM y usarlo como entorno.
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -144,6 +157,8 @@ export class SkyEnv {
    */
   followPlayer(playerPos: THREE.Vector3): void {
     this.clouds.position.set(playerPos.x, 0, playerPos.z);
+    // El disco del sol se mantiene fijo en dirección, pegado al jugador.
+    this.sunMesh.position.copy(playerPos).addScaledVector(this.sunDir, 1500);
     const texel = (this.shadowExtent * 2) / this.sun.shadow.mapSize.x;
 
     const dir = this.sunDir;
