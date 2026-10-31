@@ -17,11 +17,11 @@ export interface Collider {
  * cuando el jugador se desplaza.
  */
 const LODS: { dist: number; detail: MeshDetail; castShadow: boolean }[] = [
-  { dist: 70, detail: {}, castShadow: true },
+  { dist: 52, detail: {}, castShadow: true },
   {
-    dist: 160,
+    dist: 115,
     detail: { sectionStride: 2, segmentFactor: 0.65, leafStride: 2, leafScale: 1.25 },
-    castShadow: true
+    castShadow: false
   },
   {
     dist: Infinity,

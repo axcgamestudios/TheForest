@@ -8,10 +8,11 @@ import { mergeGeos, Collider } from './Trees';
 export function createRocks(field: Heightfield, scene: THREE.Scene, colliders: Collider[]): void {
   const rng = mulberry32(31337);
 
-  // Dos variantes de roca desplazada por ruido.
+  // Dos variantes de roca desplazada por ruido (subdivisión 2: 4x menos
+  // triángulos que la 3, indistinguible tras el desplazamiento fbm).
   const variants: THREE.BufferGeometry[] = [];
   for (let v = 0; v < 2; v++) {
-    const g = new THREE.IcosahedronGeometry(1, 3);
+    const g = new THREE.IcosahedronGeometry(1, 2);
     const pos = g.attributes.position as THREE.BufferAttribute;
     const seed = 400 + v * 77;
     for (let i = 0; i < pos.count; i++) {

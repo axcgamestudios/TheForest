@@ -25,9 +25,13 @@ export class Drone {
   private bank = 0;
   private alert = false;
 
+  /** Posición actual del dron (misiones / brújula). */
+  get position(): THREE.Vector3 {
+    return this.group.position;
+  }
+
   constructor(scene: THREE.Scene, field: Heightfield) {
     this.baseY = field.sampleHeight(SUMMIT.x, SUMMIT.z);
-
     const plastic = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0.03, 0.03, 0.035),
       roughness: 0.55,

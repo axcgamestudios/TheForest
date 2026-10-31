@@ -3,21 +3,31 @@ import { Heightfield } from '../world/heightfield';
 import { Collider } from '../world/Trees';
 
 const EYE_HEIGHT = 1.68;
-const WALK_SPEED = 4.0;
-const SPRINT_MULT = 1.85;
+const WALK_SPEED = 4.6;
+const SPRINT_MULT = 2.05;
 const GRAVITY = 22;
-const JUMP_SPEED = 5.2;
+const JUMP_SPEED = 5.4;
+const BASE_FOV = 70;
+const MENU_FOV = 58;
 
 /**
  * Controlador en primera persona: pointer lock + WASD, gravedad,
- * colisión con el terreno (muestreo del heightfield) y con árboles/rocas,
- * sprint y head-bob sutil.
+ * colisión con el terreno (muestreo del heightfield) y con árboles/rocas.
+ *
+ * La cámara "siente" el movimiento: head-bob pronunciado al caminar que
+ * se intensifica al correr, alabeo sutil, kick de FOV en sprint, dip al
+ * aterrizar y respiración al quedarse quieto.
  */
 export class FirstPersonController {
   readonly position: THREE.Vector3;
   enabled = false;
   /** Velocidad de caída con la que se tocó el suelo este frame (0 si no hubo aterrizaje). */
   landingSpeed = 0;
+
+  // Estadísticas para las misiones.
+  walkedDistance = 0;
+  sprintDistance = 0;
+  jumps = 0;
 
   private yaw = Math.PI; // mirando hacia -Z... (yaw 0 mira a -Z; PI mira a +Z)
   private pitch = 0;
@@ -26,6 +36,9 @@ export class FirstPersonController {
   private readonly keys = new Set<string>();
   private bobTime = 0;
   private bobAmount = 0;
+  private idleTime = 0;
+  private camDip = 0;
+  private camDipVel = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -51,11 +64,27 @@ export class FirstPersonController {
       this.pitch = THREE.MathUtils.clamp(this.pitch, -lim, lim);
     });
 
-    this.syncCamera(0);
+    this.camera.fov = MENU_FOV;
+    this.camera.updateProjectionMatrix();
+    this.syncCamera();
   }
 
   get isGrounded(): boolean {
     return this.grounded;
+  }
+
+  get isSprinting(): boolean {
+    return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+  }
+
+  /** Velocidad horizontal actual (m/s). */
+  get horizontalSpeed(): number {
+    return Math.hypot(this.velocity.x, this.velocity.z);
+  }
+
+  /** Orientación de vista actual (sin bob), para la transición del menú. */
+  getViewQuaternion(target: THREE.Quaternion): THREE.Quaternion {
+    return target.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
   }
 
   update(dt: number): void {
@@ -72,12 +101,12 @@ export class FirstPersonController {
       if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) input.sub(right);
     }
 
-    const sprinting = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const sprinting = this.isSprinting;
     const targetSpeed = input.lengthSq() > 0 ? WALK_SPEED * (sprinting ? SPRINT_MULT : 1) : 0;
     if (input.lengthSq() > 0) input.normalize();
 
-    // Aceleración/fricción horizontales.
-    const accel = this.grounded ? 30 : 8;
+    // Aceleración/fricción horizontales (más ágil que antes).
+    const accel = this.grounded ? 38 : 9;
     this.velocity.x = THREE.MathUtils.damp(this.velocity.x, input.x * targetSpeed, accel * 0.35, dt);
     this.velocity.z = THREE.MathUtils.damp(this.velocity.z, input.z * targetSpeed, accel * 0.35, dt);
 
@@ -85,12 +114,20 @@ export class FirstPersonController {
     if (this.enabled && this.grounded && this.keys.has('Space')) {
       this.velocity.y = JUMP_SPEED;
       this.grounded = false;
+      this.jumps++;
     }
     if (!this.grounded) this.velocity.y -= GRAVITY * dt;
 
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
     this.position.y += this.velocity.y * dt;
+
+    // Estadísticas de desplazamiento.
+    const hDist = Math.hypot(this.velocity.x, this.velocity.z) * dt;
+    this.walkedDistance += hDist;
+    if (sprinting && hDist > 0.008 && this.horizontalSpeed > WALK_SPEED * 1.1) {
+      this.sprintDistance += hDist;
+    }
 
     // Colisión con árboles y rocas: empuje horizontal.
     for (const c of this.colliders) {
@@ -116,24 +153,53 @@ export class FirstPersonController {
       this.grounded = false;
     }
 
-    // Head-bob proporcional a la velocidad horizontal.
-    const hSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-    const target = this.grounded ? THREE.MathUtils.clamp(hSpeed / WALK_SPEED, 0, 1.8) : 0;
-    this.bobAmount = THREE.MathUtils.damp(this.bobAmount, target, 6, dt);
-    this.bobTime += dt * (4.6 + hSpeed * 0.9);
-
     this.syncCamera(dt);
   }
 
-  private syncCamera(_dt: number): void {
-    const bobY = Math.sin(this.bobTime * 2) * 0.032 * this.bobAmount;
-    const bobX = Math.cos(this.bobTime) * 0.02 * this.bobAmount;
+  private syncCamera(dt = 0): void {
+    const hSpeed = this.horizontalSpeed;
+    const sprinting = this.isSprinting && hSpeed > WALK_SPEED * 1.05;
+
+    // --- Head-bob: pronunciado y ligado a la velocidad real ---
+    const target = this.grounded ? THREE.MathUtils.clamp(hSpeed / WALK_SPEED, 0, 2.1) : 0;
+    this.bobAmount = THREE.MathUtils.damp(this.bobAmount, target, 8, dt);
+    const bobSpeed = 4.4 + hSpeed * 1.15;
+    this.bobTime += dt * bobSpeed;
+
+    const amp = this.bobAmount * this.bobAmount;
+    const bobY = Math.sin(this.bobTime * 2) * 0.055 * amp;
+    const bobX = Math.cos(this.bobTime) * 0.038 * amp;
+    const roll = Math.sin(this.bobTime) * 0.016 * amp;
+
+    // Respiración sutil al estar quieto.
+    this.idleTime += dt;
+    const breathe = Math.sin(this.idleTime * 1.35) * 0.007 * (1 - Math.min(this.bobAmount, 1));
+
+    // --- Dip con muelle al aterrizar ---
+    if (this.landingSpeed > 2.5) {
+      this.camDipVel -= Math.min(this.landingSpeed * 1.35, 6.5);
+    }
+    if (dt > 0) {
+      this.camDip += this.camDipVel * dt;
+      this.camDipVel += (-this.camDip * 85 - this.camDipVel * 11) * dt;
+      this.camDip = THREE.MathUtils.clamp(this.camDip, -0.45, 0.2);
+    }
+    const dip = -Math.abs(Math.min(this.camDip, 0)) - Math.max(this.camDip, 0) * 0.4;
 
     this.camera.position.set(
       this.position.x + bobX * Math.cos(this.yaw),
-      this.position.y + bobY,
+      this.position.y + bobY + breathe + dip,
       this.position.z - bobX * Math.sin(this.yaw)
     );
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, roll, 'YXZ'));
+
+    // --- FOV: kick al correr, se relaja al parar ---
+    // (el estado vive en camera.fov para no pisar el FOV del menú)
+    const targetFov = BASE_FOV + (sprinting ? 7 : 0) + THREE.MathUtils.clamp(hSpeed - WALK_SPEED, 0, 6) * 0.5;
+    const newFov = dt > 0 ? THREE.MathUtils.damp(this.camera.fov, targetFov, 5, dt) : this.camera.fov;
+    if (Math.abs(newFov - this.camera.fov) > 0.004) {
+      this.camera.fov = newFov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 }

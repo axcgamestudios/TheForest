@@ -16,16 +16,18 @@ import { CLOUD_GLSL } from '../core/cloudGlsl';
  */
 export function createGrass(field: Heightfield, count: number): THREE.InstancedMesh {
   // Media anchura del cuadrado de pasto que rodea al jugador.
-  const HALF = 110;
+  // Reducido de 110 a 52: el pasto 3D solo existe cerca del jugador.
+  const HALF = 52;
   // El desvanecimiento termina antes de la esquina del cuadrado de wrap.
-  const FADE_START = 76;
-  const FADE_END = 104;
+  const FADE_START = 26;
+  const FADE_END = 48;
 
   // Geometría de la mata: 3 planos cruzados con ligera curva.
+  // Briznas cortas (~0.66 m) en vez de hierba alta de 1.3 m.
   const planes: THREE.BufferGeometry[] = [];
   for (let i = 0; i < 3; i++) {
-    const p = new THREE.PlaneGeometry(1.15, 1.3, 1, 2);
-    p.translate(0, 0.65, 0);
+    const p = new THREE.PlaneGeometry(0.8, 0.66, 1, 2);
+    p.translate(0, 0.33, 0);
     p.rotateY((i * Math.PI) / 3);
     planes.push(p);
   }
@@ -89,15 +91,15 @@ export function createGrass(field: Heightfield, count: number): THREE.InstancedM
         vec3 gP = gRS * (transformed * gScale);
 
         // Viento: brisa amplia + agitación fina, curvado desde la base.
-        float hf = clamp(position.y / 1.2, 0.0, 1.0);
+        float hf = clamp(position.y / 0.66, 0.0, 1.0);
         hf *= hf;
         float t = uTime;
         float w1 = sin(t * 1.35 + gXZ.x * 0.13 + gXZ.y * 0.09);
         float w2 = sin(t * 2.8 + gXZ.x * 0.8 + gXZ.y * 0.6 + gRnd * 6.283) * 0.5;
         float gust = 0.6 + 0.4 * sin(t * 0.37 + gXZ.x * 0.021 + gXZ.y * 0.017);
-        vec2 sway = normalize(vec2(0.82, 0.44)) * (w1 + w2) * 0.22 * gust * hf * (0.6 + 0.75 * gRnd);
+        vec2 sway = normalize(vec2(0.82, 0.44)) * (w1 + w2) * 0.15 * gust * hf * (0.6 + 0.75 * gRnd);
 
-        vec3 gWP = vec3(gXZ.x + gP.x + sway.x, gH + gP.y - 0.05, gXZ.y + gP.z + sway.y);
+        vec3 gWP = vec3(gXZ.x + gP.x + sway.x, gH + gP.y - 0.035, gXZ.y + gP.z + sway.y);
         vGWPos = gWP;
 
         vec4 mvPosition = viewMatrix * vec4(gWP, 1.0);
@@ -153,9 +155,9 @@ export function createGrass(field: Heightfield, count: number): THREE.InstancedM
   for (let i = 0; i < count; i++) {
     const x = (rng() * 2 - 1) * HALF;
     const z = (rng() * 2 - 1) * HALF;
-    const s = 0.85 + rng() * 0.8;
+    const s = 0.8 + rng() * 0.6;
     q.setFromAxisAngle(up, rng() * Math.PI * 2);
-    m.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s * (0.85 + rng() * 0.4), s));
+    m.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s * (0.85 + rng() * 0.35), s));
     mesh.setMatrixAt(i, m);
 
     // Parches secos amarillentos según ruido de baja frecuencia.

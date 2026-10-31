@@ -4,11 +4,11 @@
 
 Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de juegos: terreno, vegetación, cielo, clima, audio y entidades son sistemas propios. Casi todo el mundo es **generado proceduralmente por código** — las texturas se dibujan en canvas, los árboles crecen por algoritmo, el viento y las aves se sintetizan en tiempo real — complementado con un puñado de assets propios (la efigie, los cristales y el material fotogramétrico del sendero).
 
-> Camina por una pradera de pasto alto mecido por el viento, sigue el sendero pedregoso que serpentea ladera arriba entre árboles, cruza el anillo de cristales de la cumbre y encara la efigie del Marcador, cuyos glifos laten en rojo… bajo la mirada de un dron que bajará a inspeccionarte.
+> Camina por una pradera de pasto mecido por el viento, sigue el sendero pedregoso que serpentea ladera arriba entre árboles, cruza el anillo de cristales de la cumbre y encara la efigie del Marcador, cuyos glifos laten en rojo… bajo la mirada de un dron que bajará a inspeccionarte. Por el camino: flores luminosas, fragmentos de cristal y reliquias escondidas que dan forma a 12 misiones.
 
 ## 🕹️ Demo en vivo
 
-**Juega ahora mismo en tu navegador:** 👉 **https://jalexiscv.github.io/TheForest/**
+**Juega ahora mismo en tu navegador:** 👉 **https://axcgamestudios.github.io/TheForest/**
 
 ---
 
@@ -27,11 +27,18 @@ Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de jueg
 
 ### Mundo
 - **Terreno de 600×600 m** generado por heightfield analítico (fBm multicapa): pradera, loma del sendero, cerro coronable de ~74 m y cordón de colinas boscosas en el horizonte.
+- **Terreno en chunks**: el mundo se divide en una cuadrícula de 6×6 celdas; cada una tiene una malla de detalle (1.56 m por celda) que solo se dibuja cerca del jugador y una malla ligera para la distancia, con normales analíticas compartidas para que no haya costuras y *frustum culling* por chunk.
 - **Sendero pedregoso** que serpentea desde la pradera hasta la cumbre, recubierto con **material fotogramétrico PBR** (albedo + normal map) alineado con un relieve macro horneado desde malla, que se ensancha y erosiona cuesta arriba.
-- **Pasto instanciado** (45k–220k matas según preset) con *wrap toroidal* en GPU: el campo de pasto sigue al jugador hasta ~110 m sin costo de CPU, con viento de dos frecuencias, translucidez a contraluz y desvanecimiento por hundimiento.
-- **Bosque procedural**: árboles generados por esqueleto recursivo (algoritmo estilo ez-tree) con 3 niveles de ramificación, hojas en las puntas y **LOD dinámico de 3 niveles** redistribuido por distancia.
+- **Pasto instanciado** (12k–42k matas según preset, briznas de ~0.7 m) con *wrap toroidal* en GPU: el campo de pasto sigue al jugador hasta ~50 m sin costo de CPU, con viento de dos frecuencias, translucidez a contraluz y desvanecimiento por hundimiento.
+- **Bosque procedural**: árboles generados por esqueleto recursivo (algoritmo estilo ez-tree) con 3 niveles de ramificación, hojas en las puntas y **LOD dinámico de 3 niveles** redistribuido por distancia (detalle completo solo a <52 m, billboard lejos).
 - **Cielo vivo**: atmósfera física (shader Sky + IBL), **nubes procedurales ancladas al mundo** que derivan, mutan y **proyectan sombras móviles** sobre el terreno y el pasto — el mismo campo matemático define la nube y su sombra.
 - **Rocas con musgo, troncos caídos, polen flotando** a contraluz.
+
+### Misiones y progresión
+- **12 misiones** encadenadas por requisitos: caminar, correr, alcanzar puntos de interés (obelisco, cumbre, efigie), acercarse al dron y **coleccionistas**.
+- **16 coleccionables interactivos** con brillo: 8 flores luminosas, 5 fragmentos de cristal y 3 reliquias escondidas — se recogen con **E** y detonan destellos y sonidos.
+- **HUD completo**: brújula con marcadores de misión y distancias, rastreador de misiones activas con progreso, avisos emergentes (toasts), **XP y niveles**.
+- Activación por oleadas: siempre hay hasta 4 misiones activas desde el primer minuto.
 
 ### La cumbre
 - **Efigie del Marcador** (Dead Space): modelo esculpido real de 1.4M de triángulos, decimado a 105k con herramienta propia, con **glifos emisivos proyectados por UVs cilíndricas que laten** cada ~6 segundos.
@@ -39,10 +46,12 @@ Construido desde cero con **WebGL 2 + Three.js + TypeScript**, sin motor de jueg
 - **Dron de vigilancia con IA**: patrulla en órbita elíptica sobre la efigie; si te acercas, **interrumpe la ronda, vuela hacia ti, te rodea inspeccionándote** con su cámara y LED de alerta, y regresa a su patrulla.
 
 ### Presentación
-- **Iluminación**: sol direccional con sombras de 2048–4096 px que siguen al jugador con anclaje a texels (sin parpadeo), ambiente por IBL del propio cielo, niebla atmosférica.
+- **Pantalla de carga con motion graphics**: bosque en siluetas con parallax, niebla que deriva, luciérnagas, rayos de luz y luna — todo animado en un canvas 2D — con anillo de progreso, título con revelado letra a letra y consejos rotativos.
+- **Menú principal cinematográfico**: el mundo 3D real se renderiza detrás mientras una cámara orbital lo sobrevuela; al entrar, transición suave de 1.2 s (posición, orientación y FOV) hasta los ojos del jugador. Menú de pausa con panel de misiones, controles, créditos y selector de calidad.
+- **Iluminación**: sol direccional con sombras de 1024–4096 px que siguen al jugador con anclaje a texels (sin parpadeo), ambiente por IBL del propio cielo, niebla atmosférica.
 - **Postproceso HDR**: bloom, tone mapping ACES, SMAA y viñeta.
-- **Audio 100% sintetizado** con Web Audio API: viento con ráfagas sincronizadas al viento visual, trinos de aves con paneo y distancia, roce del pasto al caminar, pasos que cambian según la superficie (pasto/tierra) y aterrizajes con impacto.
-- **Controlador de primera persona**: pointer lock, WASD, sprint, salto, head-bob, colisión con terreno, árboles, rocas y estructuras.
+- **Audio 100% sintetizado** con Web Audio API: viento con ráfagas sincronizadas al viento visual, trinos de aves con paneo y distancia, roce del pasto al caminar, pasos que cambian según la superficie (pasto/tierra), aterrizajes con impacto y motivos musicales para recogidas, misiones y subidas de nivel.
+- **Controlador de primera persona**: pointer lock, WASD, sprint, salto, **head-bob pronunciado ligado a la velocidad**, kick de FOV al correr, dip con muelle al aterrizar, respiración al estar quieto y colisión con terreno, árboles, rocas y estructuras.
 
 ---
 
@@ -80,13 +89,13 @@ http://localhost/TheForest/dist/
 
 ### Presets de calidad
 
-Ajustables por parámetro de URL — útil en equipos modestos o para exprimir GPUs potentes:
+Ajustables desde el menú (se recuerdan en `localStorage`) o por parámetro de URL — útil en equipos modestos o para exprimir GPUs potentes:
 
-| URL | Pasto | Sombras | Pixel ratio |
-|---|---|---|---|
-| `?q=low` | 45 000 matas | 2048 px | ≤1.25 |
-| `?q=med` *(defecto)* | 130 000 matas | 3072 px | ≤1.6 |
-| `?q=high` | 220 000 matas | 4096 px | ≤2 |
+| URL | Pasto | Sombras | Pixel ratio | Sombras en pasto |
+|---|---|---|---|---|
+| `?q=low` | 12 000 matas | 1024 px | ≤1 | no |
+| `?q=med` *(defecto)* | 28 000 matas | 2048 px | ≤1.5 | sí |
+| `?q=high` | 42 000 matas | 4096 px | ≤2 | sí |
 
 ---
 
@@ -97,9 +106,10 @@ Ajustables por parámetro de URL — útil en equipos modestos o para exprimir G
 | **Clic** (en el menú) | Entrar al juego (captura el mouse y activa el audio) |
 | **W A S D** / flechas | Moverse |
 | **Mouse** | Mirar |
-| **Shift** | Correr |
+| **Shift** | Correr (la cámara se abre al sprint) |
 | **Espacio** | Saltar |
-| **Esc** | Volver al menú |
+| **E** | Recoger objetos (flores, cristales, reliquias) |
+| **Esc** | Pausa / menú |
 
 ---
 
@@ -113,16 +123,22 @@ TheForest/
 │   ├── models/                 #   Binarios decimados (.bin) y relieve
 │   └── textures/               #   Material fotogramétrico optimizado
 ├── src/
-│   ├── main.ts                 # Bootstrap, overlay, pointer lock
+│   ├── main.ts                 # Bootstrap: carga, menú, pausa, paneles, calidad
 │   ├── core/
-│   │   ├── Engine.ts           # Renderer, escena, bucle, presets, orquestación
+│   │   ├── Engine.ts           # Renderer, escena, bucle, menú cinematográfico
 │   │   ├── noise.ts            # PRNG determinista + value noise + fBm + ridged
 │   │   ├── textures.ts         # Texturas procedurales dibujadas en canvas
 │   │   ├── cloudGlsl.ts        # Campo de nubes GLSL compartido (cielo ↔ sombras)
 │   │   └── uniforms.ts         # Uniforms compartidos (viento, jugador, sol)
+│   ├── game/
+│   │   ├── Missions.ts         # 12 misiones, activación por oleadas, XP/niveles
+│   │   └── Collectibles.ts     # Flores, cristales y reliquias con brillo (tecla E)
+│   ├── ui/
+│   │   ├── bootFx.ts           # Motion graphics de la pantalla de carga (canvas 2D)
+│   │   └── Hud.ts              # Brújula, rastreador, toasts, prompt y XP
 │   ├── world/
 │   │   ├── heightfield.ts      # Relieve analítico, máscara de pasto, sendero
-│   │   ├── Terrain.ts          # Malla + shader de splatting con PBR del camino
+│   │   ├── Terrain.ts          # Terreno en CHUNKS (detalle/ligero) + splatting PBR
 │   │   ├── Grass.ts            # Pradera instanciada con wrap toroidal en GPU
 │   │   ├── TreeGen.ts          # Generador de árboles por esqueleto recursivo
 │   │   ├── Trees.ts            # Bosque instanciado con LOD dinámico
@@ -133,7 +149,7 @@ TheForest/
 │   ├── player/
 │   │   └── FirstPersonController.ts
 │   ├── audio/
-│   │   └── AudioSystem.ts      # Viento, aves, pasos — todo sintetizado
+│   │   └── AudioSystem.ts      # Viento, aves, pasos y motivos — todo sintetizado
 │   └── fx/
 │       └── PostProcessing.ts   # Bloom + ACES + SMAA + viñeta
 ├── tools/
@@ -182,11 +198,12 @@ El formato `.bin` es deliberadamente simple: `[u32 nVerts][u32 nTris][f32 posici
 
 Diseñado para sostener **60 FPS en GPUs de gama media** a 1080p:
 
-- Pasto: un solo `InstancedMesh`; el "seguimiento infinito" del jugador se resuelve con aritmética modular en el vertex shader (cero trabajo de CPU).
-- Árboles: geometría compartida por variante; el LOD reasigna instancias entre 3 mallas por distancia solo cuando el jugador se desplaza >6 m.
-- Sombras: un único mapa direccional que sigue al jugador anclado a la cuadrícula de texels.
-- Nubes: un draw call; sus sombras son ~12 evaluaciones extra de ruido por píxel de suelo.
-- Los presets `low/med/high` escalan densidad de pasto, resolución de sombras y pixel ratio.
+- **Terreno en chunks**: la malla de detalle (1.56 m/celda) solo se dibuja a <165 m del jugador; el resto usa la malla ligera (6.25 m/celda) y el *frustum culling* descarta lo que está fuera de cámara. Se pasa de ~295k triángulos siempre dibujados a ~50–90k típicos.
+- **Pasto**: un solo `InstancedMesh` de 12k–42k matas cortas en un radio de ~50 m (antes 220k matas de 1.3 m en 110 m); el "seguimiento infinito" del jugador se resuelve con aritmética modular en el vertex shader (cero trabajo de CPU).
+- **Árboles**: geometría compartida por variante; el LOD reasigna instancias entre 3 mallas por distancia solo cuando el jugador se desplaza >6 m; solo el LOD cercano (<52 m) proyecta sombra.
+- **Sombras**: un único mapa direccional (75 m de radio) que sigue al jugador anclado a la cuadrícula de texels.
+- **Nubes**: un draw call; sus sombras son ~12 evaluaciones extra de ruido por píxel de suelo.
+- Los presets `low/med/high` escalan densidad de pasto, resolución de sombras, pixel ratio y sombras sobre el pasto.
 
 ---
 

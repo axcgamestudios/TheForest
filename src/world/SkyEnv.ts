@@ -10,7 +10,7 @@ import { CLOUD_GLSL, CLOUD_HEIGHT, CLOUD_SCALE } from '../core/cloudGlsl';
 export class SkyEnv {
   readonly sunDir: THREE.Vector3;
   readonly sun: THREE.DirectionalLight;
-  private readonly shadowExtent = 95;
+  private readonly shadowExtent = 75;
   private clouds!: THREE.Mesh;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shadowMapSize: number) {

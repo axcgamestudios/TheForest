@@ -78,6 +78,47 @@ export class AudioSystem {
     this.master.gain.setTargetAtTime(inMenu ? 0.06 : 0.55, t, 0.4);
   }
 
+  /** Motivos cortos para eventos de juego (recogida, misión, nivel, UI). */
+  playEvent(kind: 'pickup' | 'mission' | 'level' | 'ui'): void {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+
+    const notes: { f: number; t: number; d: number; g: number; type?: OscillatorType }[] =
+      kind === 'pickup'
+        ? [
+            { f: 880, t: 0, d: 0.1, g: 0.1 },
+            { f: 1318, t: 0.07, d: 0.12, g: 0.09 }
+          ]
+        : kind === 'mission'
+          ? [
+              { f: 523, t: 0, d: 0.14, g: 0.08 },
+              { f: 659, t: 0.11, d: 0.14, g: 0.08 },
+              { f: 784, t: 0.22, d: 0.2, g: 0.09 }
+            ]
+          : kind === 'level'
+            ? [
+                { f: 392, t: 0, d: 0.16, g: 0.08 },
+                { f: 494, t: 0.12, d: 0.16, g: 0.08 },
+                { f: 587, t: 0.24, d: 0.16, g: 0.09 },
+                { f: 784, t: 0.36, d: 0.3, g: 0.1 }
+              ]
+            : [{ f: 660, t: 0, d: 0.05, g: 0.05, type: 'triangle' }];
+
+    const t0 = ctx.currentTime + 0.01;
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      osc.type = n.type ?? 'sine';
+      osc.frequency.value = n.f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0 + n.t);
+      g.gain.linearRampToValueAtTime(n.g, t0 + n.t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + n.t + n.d);
+      osc.connect(g).connect(this.master);
+      osc.start(t0 + n.t);
+      osc.stop(t0 + n.t + n.d + 0.05);
+    }
+  }
+
   update(dt: number, time: number): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const ctx = this.ctx;

@@ -4,9 +4,23 @@ import { groundDetailTexture } from '../core/textures';
 import { CLOUD_GLSL } from '../core/cloudGlsl';
 import { shared } from '../core/uniforms';
 
-const MESH_RES = 384;
+const CHUNKS = 6;
+/** Tamaño de cada chunk en metros (600 / 6). */
+const CHUNK_SIZE = WORLD_SIZE / CHUNKS;
+/** Resolución del chunk de detalle (1.56 m por celda, igual que antes). */
+const DETAIL_RES = 64;
+/** Resolución del chunk lejano (6.25 m por celda). */
+const LOW_RES = 16;
+/** Distancia (al centro del chunk) hasta la que se usa la malla de detalle. */
+const DETAIL_DIST = 165;
 /** Metros por tile del material rocoso (Rockwall: albedo+normal+relieve). */
 const RELIEF_TILE = 5.5;
+
+export interface TerrainSystem {
+  group: THREE.Group;
+  /** Activa el chunk de detalle o el ligero según la distancia a la cámara. */
+  update: (camPos: THREE.Vector3) => void;
+}
 
 /** Carga la textura de relieve horneada por tools/bake-relief.mjs. */
 async function loadReliefTexture(): Promise<THREE.DataTexture> {
@@ -31,12 +45,14 @@ async function loadReliefTexture(): Promise<THREE.DataTexture> {
 }
 
 /**
- * Malla del terreno desplazada por el heightfield.
- * Splatting procedural: pasto por parches, suelo pedregoso (textura con
- * relieve/bump alineado + relieve rocoso macro) en sendero y calvas,
- * roca gris en cortes verticales.
+ * Terreno en CHUNKS: el mundo se divide en una cuadrícula de 6x6.
+ * Cada celda tiene dos mallas: una de detalle (64x64, sólo se ve cerca)
+ * y una ligera (16x16) para la distancia. Con esto la GPU sólo procesa
+ * geometría alta cerca del jugador, y el frustum culling descarta los
+ * chunks fuera de cámara. Las normales se calculan analíticamente desde
+ * el heightfield para que no haya costuras de iluminación entre chunks.
  */
-export async function createTerrain(field: Heightfield): Promise<THREE.Mesh> {
+export async function createTerrain(field: Heightfield): Promise<TerrainSystem> {
   const loader = new THREE.TextureLoader();
   const base = import.meta.env.BASE_URL;
   const [reliefTex, rockAlbedo, rockNormal] = await Promise.all([
@@ -52,16 +68,6 @@ export async function createTerrain(field: Heightfield): Promise<THREE.Mesh> {
     t.anisotropy = 8;
   }
   rockNormal.repeat.set(WORLD_SIZE / RELIEF_TILE, WORLD_SIZE / RELIEF_TILE);
-  const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, MESH_RES, MESH_RES);
-  geo.rotateX(-Math.PI / 2);
-
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    pos.setY(i, field.sampleHeight(x, z));
-  }
-  geo.computeVertexNormals();
 
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -195,8 +201,67 @@ export async function createTerrain(field: Heightfield): Promise<THREE.Mesh> {
       );
   };
 
+  const group = new THREE.Group();
+  const detailMeshes: THREE.Mesh[] = [];
+  const lowMeshes: THREE.Mesh[] = [];
+  const centers: { x: number; z: number }[] = [];
+
+  for (let cz = 0; cz < CHUNKS; cz++) {
+    for (let cx = 0; cx < CHUNKS; cx++) {
+      const x0 = -WORLD_SIZE / 2 + cx * CHUNK_SIZE;
+      const z0 = -WORLD_SIZE / 2 + cz * CHUNK_SIZE;
+      centers.push({ x: x0 + CHUNK_SIZE / 2, z: z0 + CHUNK_SIZE / 2 });
+      detailMeshes.push(buildChunk(field, mat, x0, z0, DETAIL_RES));
+      lowMeshes.push(buildChunk(field, mat, x0, z0, LOW_RES));
+      group.add(detailMeshes[detailMeshes.length - 1], lowMeshes[lowMeshes.length - 1]);
+    }
+  }
+
+  const update = (camPos: THREE.Vector3): void => {
+    for (let i = 0; i < centers.length; i++) {
+      const c = centers[i];
+      const near = Math.hypot(c.x - camPos.x, c.z - camPos.z) < DETAIL_DIST;
+      detailMeshes[i].visible = near;
+      lowMeshes[i].visible = !near;
+    }
+  };
+
+  return { group, update };
+}
+
+/**
+ * Construye un chunk del terreno: geometría desplazada por el heightfield
+ * con normales analíticas (gradiente central), en coordenadas de mundo
+ * para que el frustum culling funcione por chunk.
+ */
+function buildChunk(
+  field: Heightfield,
+  mat: THREE.Material,
+  x0: number,
+  z0: number,
+  res: number
+): THREE.Mesh {
+  const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, res, res);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(x0 + CHUNK_SIZE / 2, 0, z0 + CHUNK_SIZE / 2);
+
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const nor = geo.attributes.normal as THREE.BufferAttribute;
+  const e = 1.2;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setY(i, field.sampleHeight(x, z));
+    // Normal analítica compartida entre chunks: sin costuras de sombreado.
+    const dhx = (field.sampleHeight(x + e, z) - field.sampleHeight(x - e, z)) / (2 * e);
+    const dhz = (field.sampleHeight(x, z + e) - field.sampleHeight(x, z - e)) / (2 * e);
+    const inv = 1 / Math.hypot(dhx, 1, dhz);
+    nor.setXYZ(i, -dhx * inv, inv, -dhz * inv);
+  }
+
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.castShadow = false;
+  mesh.matrixAutoUpdate = false;
   return mesh;
 }
