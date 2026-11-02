@@ -20,6 +20,8 @@ import { Economy } from '../game/Economy';
 import { Vehicles } from '../game/Vehicles';
 import { Chopping } from '../game/Chopping';
 import { Builder } from '../game/Builder';
+import { SaveSystem } from '../game/SaveSystem';
+import { CycleInfo } from '../world/SkyEnv';
 import { Hud } from '../ui/Hud';
 
 type Progress = (fraction: number, label: string) => void;
@@ -57,7 +59,7 @@ export class Engine {
   private readonly clock = new THREE.Clock();
 
   private field!: Heightfield;
-  private sky!: SkyEnv;
+  sky!: SkyEnv;
   controller!: FirstPersonController;
   private composer!: EffectComposer;
   private motes!: Motes;
@@ -74,6 +76,12 @@ export class Engine {
   hud: Hud | null = null;
   mode: EngineMode = 'menu';
   private hadFirstPlay = false;
+
+  // Ciclo día/noche (información para el HUD).
+  cycleInfo: CycleInfo = { time: 0.38, night: 0, clock: '09:07' };
+
+  // Sistema de guardado.
+  save!: SaveSystem;
 
   // Transición menú -> juego.
   private transT = 0;
@@ -196,6 +204,7 @@ export class Engine {
     const terrain = await createTerrain(this.field);
     this.scene.add(terrain.group);
     this.terrainUpdate = terrain.update;
+    this.terrainRebuild = terrain.rebuildAt;
 
     progress(0.46, 'Sembrando el pasto…');
     await tick();
@@ -212,7 +221,7 @@ export class Engine {
     await tick();
     createRocks(this.field, this.scene, colliders);
     createLogs(this.field, this.scene, colliders);
-    createStructures(this.scene, this.field, colliders);
+    createStructures(this.scene, this.field, colliders, this.sky);
     await createLandmarks(this.field, this.scene, colliders);
     this.drone = new Drone(this.scene, this.field);
     this.motes = new Motes(this.scene);
@@ -243,7 +252,14 @@ export class Engine {
       this.audio,
       this.camera
     );
-    this.builder = new Builder(this.scene, this.field, this.controller, this.economy, colliders);
+    this.builder = new Builder(
+      this.scene,
+      this.field,
+      this.controller,
+      this.economy,
+      colliders,
+      (x, z, pad) => this.terrainRebuild(x, z, pad)
+    );
     this.composer = createComposer(
       this.renderer,
       this.scene,
@@ -251,6 +267,10 @@ export class Engine {
       this.sky.sunMesh,
       this.quality.godRays
     );
+
+    // Partida guardada: posición, hora, economía, misiones, casa y coches.
+    this.save = new SaveSystem(this);
+    this.save.load();
 
     // Vista inicial cinematográfica + precompilación de shaders.
     this.updateCinematic(0);
@@ -295,6 +315,8 @@ export class Engine {
       this.controller.enabled = false;
       this.collectibles.setPlaying(false);
       this.audio.setMenu(true);
+      // Al pausar se guarda la partida.
+      this.save?.saveNow();
     }
   }
 
@@ -313,12 +335,18 @@ export class Engine {
   }
 
   private terrainUpdate!: (camPos: THREE.Vector3) => void;
+  private terrainRebuild!: (x: number, z: number, pad: number) => void;
 
   private update(): void {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = shared.uTime.value + dt;
     shared.uTime.value = t;
     const playing = this.mode === 'play';
+
+    // ---- Ciclo día/noche: avanza el reloj del mundo sólo jugando ----
+    this.cycleInfo = this.sky.updateCycle(dt, playing);
+    this.vehicles.setNight(this.cycleInfo.night);
+    this.save?.update(dt, playing);
 
     switch (this.mode) {
       case 'menu':
@@ -433,6 +461,14 @@ export class Engine {
     this.collectibles.update(dt, t, p);
     this.chopping.update(dt);
     this.builder.update();
+
+    // Avisos del constructor (compras de plantas / sótano).
+    for (const n of this.builder.notices) {
+      this.audio.playEvent(n.ok ? 'cash' : 'deny');
+      this.hud?.toast(n.ok ? 'build' : 'new', n.title, n.sub);
+    }
+    this.builder.notices.length = 0;
+
     this.missions.update(
       {
         walked: this.controller.walkedDistance,
@@ -506,6 +542,6 @@ export class Engine {
     }
     this.economy.events.length = 0;
 
-    this.hud?.update(dt);
+    this.hud?.update(dt, this.cycleInfo);
   }
 }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Heightfield, WORLD_SIZE, VILLAGE } from './heightfield';
+import { Heightfield, WORLD_SIZE, VILLAGE, PLOT } from './heightfield';
 import { barkTexture, leafClusterTexture } from '../core/textures';
 import { mulberry32, fbm2 } from '../core/noise';
 import { shared } from '../core/uniforms';
@@ -9,6 +9,13 @@ export interface Collider {
   x: number;
   z: number;
   r: number;
+  /**
+   * Banda de altura opcional (metros de suelo del jugador): el collider
+   * sólo bloquea si los pies están dentro. Se usa en el sótano del
+   * constructor para no estorbar en la planta baja.
+   */
+  minY?: number;
+  maxY?: number;
 }
 
 /** Golpes de hacha necesarios para talar un árbol. */
@@ -254,6 +261,13 @@ export function createForest(
     const dvx = x - VILLAGE.x;
     const dvz = z - VILLAGE.z;
     if (dvx * dvx + dvz * dvz < VILLAGE.r * VILLAGE.r) return false;
+    // Parcela del jugador (la casa se construye aquí).
+    if (
+      Math.abs(x - PLOT.x) < PLOT.half + 3 &&
+      Math.abs(z - PLOT.z) < PLOT.half + 3
+    ) {
+      return false;
+    }
     for (const [px, pz, ps] of placedXZ) {
       const dx = x - px;
       const dz = z - pz;

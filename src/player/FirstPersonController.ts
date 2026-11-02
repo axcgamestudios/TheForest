@@ -12,7 +12,8 @@ const MENU_FOV = 58;
 
 /**
  * Controlador en primera persona: pointer lock + WASD, gravedad,
- * colisión con el terreno (muestreo del heightfield) y con árboles/rocas.
+ * colisión con el terreno (muestreo del heightfield) y con árboles/rocas,
+ * y plataformas pisables del constructor (tarimas, escaleras, sótano).
  *
  * La cámara "siente" el movimiento: head-bob pronunciado al caminar que
  * se intensifica al correr, alabeo sutil, kick de FOV en sprint, dip al
@@ -42,6 +43,16 @@ export class FirstPersonController {
 
   /** Momento (s) de la última recogida con E, para el gesto de las manos. */
   lastPickup = -10;
+
+  /** Altura máxima de paso para subir a una plataforma (m). */
+  static readonly STEP_UP = 0.62;
+
+  /**
+   * Proveedor de suelo del constructor: (x, z, piesY) -> altura de la
+   * plataforma pisable bajo los pies (o -Infinity si no hay ninguna
+   * alcanzable). Permite caminar sobre tarimas, escaleras y el sótano.
+   */
+  private platformProvider: ((x: number, z: number, feetY: number) => number) | null = null;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -151,6 +162,31 @@ export class FirstPersonController {
     return target.setFromEuler(new THREE.Euler(this.mPitch, this.mYaw, 0, 'YXZ'));
   }
 
+  setPlatformProvider(fn: (x: number, z: number, feetY: number) => number): void {
+    this.platformProvider = fn;
+  }
+
+  /** Instantánea de la posición y la mirada (para el sistema de guardado). */
+  getSnapshot(): { x: number; y: number; z: number; yaw: number; pitch: number } {
+    return {
+      x: this.position.x,
+      y: this.position.y,
+      z: this.position.z,
+      yaw: this.mYaw,
+      pitch: this.mPitch
+    };
+  }
+
+  /** Restaura posición y mirada de una partida guardada. */
+  restoreSnapshot(s: { x: number; y: number; z: number; yaw: number; pitch: number }): void {
+    this.position.set(s.x, s.y, s.z);
+    this.mYaw = s.yaw;
+    this.mPitch = THREE.MathUtils.clamp(s.pitch, -1.5, 1.5);
+    this.velocity.set(0, 0, 0);
+    this.grounded = true;
+    this.syncCamera(0);
+  }
+
   update(dt: number): void {
     this.landingSpeed = 0;
     // Dirección de movimiento en el plano XZ según el yaw.
@@ -193,8 +229,11 @@ export class FirstPersonController {
       this.sprintDistance += hDist;
     }
 
-    // Colisión con árboles y rocas: empuje horizontal.
+    // Colisión con árboles y rocas: empuje horizontal (los colliders con
+    // banda de altura sólo bloquean si los pies están dentro).
+    const feetY = this.position.y - EYE_HEIGHT;
     for (const c of this.colliders) {
+      if (c.minY !== undefined && (feetY < c.minY || feetY > (c.maxY ?? c.minY))) continue;
       const dx = this.position.x - c.x;
       const dz = this.position.z - c.z;
       const rr = c.r + 0.42;
@@ -206,14 +245,24 @@ export class FirstPersonController {
       }
     }
 
-    // Colisión con el terreno.
-    const groundY = this.field.sampleHeight(this.position.x, this.position.z) + EYE_HEIGHT;
-    if (this.position.y <= groundY) {
+    // Colisión con el terreno y con las plataformas del constructor:
+    // sólo cuentan las superficies que están por debajo de los pies + un
+    // paso (así no se teletransporta a una tarima que pasa por encima).
+    const stepUp = FirstPersonController.STEP_UP;
+    const terrainY = this.field.sampleHeight(this.position.x, this.position.z);
+    let groundY = terrainY <= feetY + stepUp ? terrainY : -Infinity;
+    if (this.platformProvider) {
+      const pY = this.platformProvider(this.position.x, this.position.z, feetY);
+      if (pY > groundY) groundY = pY;
+    }
+    if (groundY === -Infinity) groundY = terrainY; // red de seguridad
+    const eyeGroundY = groundY + EYE_HEIGHT;
+    if (this.position.y <= eyeGroundY) {
       if (!this.grounded && this.velocity.y < -3) this.landingSpeed = -this.velocity.y;
-      this.position.y = groundY;
+      this.position.y = eyeGroundY;
       this.velocity.y = 0;
       this.grounded = true;
-    } else if (this.position.y > groundY + 0.05) {
+    } else if (this.position.y > eyeGroundY + 0.05) {
       this.grounded = false;
     }
 

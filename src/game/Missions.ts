@@ -318,6 +318,36 @@ export class MissionManager {
     return n;
   }
 
+  /** Instantánea serializable (para el sistema de guardado). */
+  serialize(): { xp: number; level: number; done: string[]; progress: Record<string, number> } {
+    const done: string[] = [];
+    const progress: Record<string, number> = {};
+    for (const def of MISSIONS) {
+      const s = this.state.get(def.id)!;
+      if (s.done) done.push(def.id);
+      if (s.progress > 0) progress[def.id] = s.progress;
+    }
+    return { xp: this._xp, level: this.level, done, progress };
+  }
+
+  /** Restaura una partida (llamar antes de empezar a actualizar). */
+  apply(s: { xp?: number; level?: number; done?: string[]; progress?: Record<string, number> }): void {
+    this._xp = Math.max(0, Math.floor(s.xp ?? 0));
+    this.level = Math.max(1, Math.floor(s.level ?? 1 + Math.floor(this._xp / XP_PER_LEVEL)));
+    const done = new Set(s.done ?? []);
+    for (const def of MISSIONS) {
+      const st = this.state.get(def.id)!;
+      st.done = done.has(def.id);
+      st.active = false;
+      st.progress = st.done ? def.goal : Math.min(s.progress?.[def.id] ?? 0, def.goal);
+    }
+    // Sin eventos de activación heredados del arranque en frío.
+    this.activatedEvents.length = 0;
+    this.completedEvents.length = 0;
+    this.levelUpEvents.length = 0;
+    this.refreshActive();
+  }
+
   update(stats: PlayerStats, dronePos: THREE.Vector3): void {
     for (const def of MISSIONS) {
       const s = this.state.get(def.id)!;

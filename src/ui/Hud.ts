@@ -4,9 +4,19 @@ import { Collectibles } from '../game/Collectibles';
 import { FirstPersonController } from '../player/FirstPersonController';
 import { Economy } from '../game/Economy';
 import { Vehicles } from '../game/Vehicles';
-import { Builder, PIECES, PIECE_ORDER, PALETTE } from '../game/Builder';
+import {
+  Builder,
+  PIECES,
+  PIECE_ORDER,
+  PALETTE,
+  FLOOR_COSTS,
+  BASEMENT_COST,
+  levelName
+} from '../game/Builder';
 import { Chopping } from '../game/Chopping';
-import { SAWMILL } from '../world/heightfield';
+import { SAWMILL, PLOT } from '../world/heightfield';
+import { CycleInfo } from '../world/SkyEnv';
+import { dayIcon } from '../game/SaveSystem';
 
 /** Rumbos dibujados en la cinta de la brújula. */
 const CARDINALS: { a: number; label: string }[] = [
@@ -51,10 +61,13 @@ export class Hud {
   private readonly speedo: HTMLElement;
   private readonly speedVal: HTMLElement;
   private readonly buildbar: HTMLElement;
+  private readonly clock: HTMLElement;
+  private readonly saveDot: HTMLElement;
 
   private readonly tmpVec = new THREE.Vector3();
   private trackerRefresh = 0;
   private lastPrompt = '';
+  private lastClock = '';
   private lastLevel = -1;
   private lastXpPct = -1;
   private lastMoney = -1;
@@ -86,9 +99,18 @@ export class Hud {
     this.speedo = document.getElementById('speedo')!;
     this.speedVal = document.getElementById('speedVal')!;
     this.buildbar = document.getElementById('buildbar')!;
+    this.clock = document.getElementById('clock')!;
+    this.saveDot = document.getElementById('saveDot')!;
 
     this.resizeCompass();
     window.addEventListener('resize', () => this.resizeCompass());
+  }
+
+  /** Destello del indicador “partida guardada”. */
+  flashSave(): void {
+    this.saveDot.classList.remove('on');
+    void this.saveDot.offsetWidth; // reinicia la animación
+    this.saveDot.classList.add('on');
   }
 
   private resizeCompass(): void {
@@ -137,8 +159,15 @@ export class Hud {
     }, 4200);
   }
 
-  update(dt: number): void {
+  update(dt: number, cycle: CycleInfo): void {
     this.drawCompass();
+
+    // --- Reloj del ciclo día/noche ---
+    const clockTxt = `${dayIcon(cycle.time)} ${cycle.clock}`;
+    if (clockTxt !== this.lastClock) {
+      this.lastClock = clockTxt;
+      this.clock.textContent = clockTxt;
+    }
 
     // --- Rastreador y barra de construcción (refresco a 4 Hz) ---
     this.trackerRefresh -= dt;
@@ -255,9 +284,36 @@ export class Hud {
     const sel = this.builder.selectedType;
     const style = this.builder.selectedStyle;
     const colorIdx = this.builder.selectedColor;
+    const curLevel = this.builder.selectedLevel;
     const def = PIECES[sel];
-    const extra = style === 'stone' ? 10 : 0;
+    const extra = style === 'wood' ? 0 : style === 'stone' ? 10 : 6;
     const afford = this.economy.canAfford(def.wood, def.cash + extra);
+
+    // --- Fila de niveles: comprados, actual y comprables ---
+    const levels: string[] = [];
+    // Sótano.
+    if (this.builder.basement) {
+      levels.push(
+        `<span class="bb-lv${curLevel === -1 ? ' cur' : ''}${' own'}">🪨 Sótano</span>`
+      );
+    } else {
+      levels.push(
+        `<span class="bb-lv buy"><kbd>H</kbd> Sótano · 🪵${BASEMENT_COST.wood}+$${BASEMENT_COST.cash}</span>`
+      );
+    }
+    // Planta baja + plantas compradas.
+    for (let l = 0; l <= this.builder.floors; l++) {
+      levels.push(
+        `<span class="bb-lv${curLevel === l ? ' cur' : ''} own">${l === 0 ? '🏠 Baja' : `${l}ª planta`}</span>`
+      );
+    }
+    // Siguiente planta comprable.
+    if (this.builder.floors < FLOOR_COSTS.length) {
+      const fc = FLOOR_COSTS[this.builder.floors];
+      levels.push(
+        `<span class="bb-lv buy"><kbd>G</kbd> ${levelName(this.builder.floors + 1)} · 🪵${fc.wood}+$${fc.cash}</span>`
+      );
+    }
 
     let pieces = '';
     PIECE_ORDER.forEach((t, i) => {
@@ -266,13 +322,14 @@ export class Hud {
     });
 
     this.buildbar.innerHTML = `
-      <div class="bb-head">CONSTRUIR · <kbd>B</kbd> salir</div>
+      <div class="bb-head">CONSTRUIR · <kbd>Q</kbd>/<kbd>Z</kbd> nivel · <kbd>B</kbd> salir</div>
+      <div class="bb-levels">${levels.join('')}</div>
       <div class="bb-pieces">${pieces}</div>
       <div class="bb-body">
         <span class="bb-sel">
-          ${def.name} ·
+          ${levelName(curLevel)} · ${def.name} ·
           <i class="${afford ? 'ok' : 'no'}">🪵 ${def.wood} + $${def.cash + extra}</i>
-           · <kbd>T</kbd> ${style === 'wood' ? 'madera' : 'piedra'}
+           · <kbd>T</kbd> ${style === 'wood' ? 'madera' : style === 'stone' ? 'piedra' : 'ladrillo'}
            · <kbd>Y</kbd> <i class="swatch" style="background:#${PALETTE[colorIdx].hex.toString(16).padStart(6, '0')}"></i>${PALETTE[colorIdx].name}
            · <kbd>R</kbd> rotar · <kbd>X</kbd> demoler
         </span>
@@ -295,6 +352,9 @@ export class Hud {
         // Coche más cercano (uno fijo del pueblo como referencia).
         this.tmpVec.set(58, 0, 124);
         out.push({ pos: this.tmpVec.clone(), label: '🚗', color: '#a8e8c8' });
+      } else if (def.kind === 'build') {
+        this.tmpVec.set(PLOT.x, 0, PLOT.z);
+        out.push({ pos: this.tmpVec.clone(), label: '🔨', color: '#e8c88f' });
       } else if (def.kind === 'sell') {
         this.tmpVec.set(SAWMILL.x, 0, SAWMILL.z);
         out.push({ pos: this.tmpVec.clone(), label: '💰', color: '#ffd98c' });

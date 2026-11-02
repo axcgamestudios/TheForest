@@ -1,6 +1,7 @@
 import { Engine } from './core/Engine';
 import { startBootFx } from './ui/bootFx';
 import { Hud } from './ui/Hud';
+import { SaveSystem } from './game/SaveSystem';
 
 const $ = (id: string): HTMLElement => document.getElementById(id)!;
 
@@ -13,6 +14,7 @@ const bootPct = $('bootPct');
 const bootText = $('bootText');
 const pauseBadge = $('pauseBadge');
 const hint = $('hint');
+const hint2 = $('hint2');
 const misCounter = $('misCounter');
 const qLabel = $('qLabel');
 
@@ -23,7 +25,10 @@ const TIPS = [
   'Consejo: tala árboles con el hacha (clic izquierdo) y gana madera',
   'Consejo: sube a los coches del pueblo con F y da una vuelta',
   'Consejo: vende la madera en el aserradero (tecla E junto a la sierra)',
-  'Consejo: pulsa B y construye tu propia casa con materiales y dinero',
+  'Consejo: tu parcela está junto al pueblo: pulsa B y construye tu casa',
+  'Consejo: compra plantas con G y un sótano con H en el constructor',
+  'Consejo: de noche se encienden las farolas del pueblo',
+  'Consejo: la partida se guarda sola; también al pausar',
   'Consejo: la brújula marca tus misiones activas',
   'Consejo: el dron patrulla la cumbre… acércate si te atreves',
   'Consejo: cambia la calidad en el menú si va lento'
@@ -111,6 +116,9 @@ async function bootApp(): Promise<void> {
   );
   engine.setHud(hud);
 
+  // Indicador de autoguardado en el HUD.
+  engine.save.onSaved = () => hud.flashSave();
+
   boot.classList.add('hidden');
   menu.classList.remove('hidden');
   playBtn.disabled = false;
@@ -156,7 +164,10 @@ async function bootApp(): Promise<void> {
       hud.show();
       document.body.classList.add('playing');
       playBtn.textContent = 'REANUDAR';
-      window.setTimeout(() => hint.classList.add('faded'), 12000);
+      window.setTimeout(() => {
+        hint.classList.add('faded');
+        hint2.classList.add('faded');
+      }, 12000);
     } else {
       menu.classList.remove('hidden');
       hudRoot.classList.add('hidden');
@@ -196,6 +207,19 @@ async function bootApp(): Promise<void> {
     })
   );
 
+  // ---- Borrar partida guardada ----
+  $('btnReset').addEventListener('click', () => {
+    engine.audio.playEvent('ui');
+    if (!SaveSystem.exists()) {
+      hud.toast('new', 'Sin partida guardada', 'Aún no hay nada que borrar');
+      return;
+    }
+    if (window.confirm('¿Borrar la partida guardada? Se perderán tu casa, dinero y misiones.')) {
+      SaveSystem.wipe();
+      location.reload();
+    }
+  });
+
   // ---- Calidad ----
   document.querySelectorAll<HTMLButtonElement>('.q-pills button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -216,5 +240,6 @@ async function bootApp(): Promise<void> {
 
 bootApp().catch((err) => {
   bootText.textContent = 'Error al iniciar. Revisa la consola del navegador.';
+  (window as unknown as { __bootError: unknown }).__bootError = err;
   console.error(err);
 });

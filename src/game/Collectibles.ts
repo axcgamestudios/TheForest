@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Heightfield, SUMMIT } from '../world/heightfield';
+import { Heightfield, SUMMIT, PLOT } from '../world/heightfield';
 import { softDotTexture } from '../core/textures';
 import { mulberry32 } from '../core/noise';
 import { ItemKind } from './Missions';
@@ -57,7 +57,11 @@ export class Collectibles {
       const x = -34 + rng() * 68;
       const z = -50 + rng() * 180;
       return { x, z };
-    }, (x, z) => this.field.sampleMask(x, z) > 0.35 && this.field.sampleHeight(x, z) < 34);
+    }, (x, z) =>
+      this.field.sampleMask(x, z) > 0.35 &&
+      this.field.sampleHeight(x, z) < 34 &&
+      // Fuera de la parcela del jugador (ahí se excava el sótano).
+      (Math.abs(x - PLOT.x) > PLOT.half + 2 || Math.abs(z - PLOT.z) > PLOT.half + 2));
 
     // --- Fragmentos de cristal: 5, en la ladera alta alrededor de la cumbre ---
     this.scatter(rng, 'crystal', 5, () => {

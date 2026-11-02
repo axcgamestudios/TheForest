@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Forest</title>
+  <script>
+    window.__stacks = [];
+    window.addEventListener('error', function (e) {
+      window.__stacks.push(String((e.error && e.error.stack) || e.message));
+    });
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B2%3C/text%3E%3C/svg%3E" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -107,6 +113,33 @@
     .res-wood b { color: #d9b98c; }
     .res-sep { width: 1px; height: 16px; background: var(--panel-line); }
 
+    /* Reloj del ciclo día/noche + indicador de guardado */
+    #clock {
+      display: flex; align-items: center; gap: 6px;
+      color: #dfe9d2; font-variant-numeric: tabular-nums;
+      font-weight: 700; letter-spacing: 0.04em;
+    }
+    #saveDot {
+      display: flex; align-items: center; gap: 5px;
+      color: var(--ink-faint); font-size: 0.68rem;
+      opacity: 0.35; transition: opacity 0.3s ease;
+    }
+    #saveDot::before {
+      content: '';
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--ink-faint);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+    #saveDot.on { opacity: 1; color: #9fe8a8; }
+    #saveDot.on::before {
+      background: #9fe8a8;
+      box-shadow: 0 0 10px rgba(159,232,168,0.9);
+      animation: savePulse 2.4s ease forwards;
+    }
+    @keyframes savePulse {
+      0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.35; }
+    }
+
     /* Velocímetro al conducir */
     #speedo {
       position: absolute; bottom: 15%; left: 50%; transform: translateX(-50%);
@@ -153,6 +186,27 @@
     }
     .bb-hint { font-size: 0.68rem; color: var(--ink-faint); margin-left: 10px; }
     #buildbar kbd { padding: 0.08rem 0.32rem; font-size: 0.62rem; }
+    /* Fila de niveles (sótano · plantas) */
+    .bb-levels {
+      display: flex; justify-content: center; gap: 6px; flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .bb-lv {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 999px; font-size: 0.66rem;
+      color: var(--ink-dim);
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+    }
+    .bb-lv.own { color: #cfe0b8; }
+    .bb-lv.cur {
+      color: #0c1409; background: rgba(210,235,170,0.85);
+      border-color: rgba(210,235,170,0.9); font-weight: 700;
+    }
+    .bb-lv.buy {
+      color: #ffd98c; border-color: rgba(255,217,140,0.45);
+      border-style: dashed;
+    }
 
     #xpwrap {
       position: absolute; bottom: 16px; left: 16px;
@@ -200,6 +254,13 @@
       white-space: nowrap; transition: opacity 1.2s ease;
     }
     #hint.faded { opacity: 0; }
+    #hint2 {
+      position: absolute; bottom: 38px; left: 50%; transform: translateX(-50%);
+      font-size: 0.7rem; letter-spacing: 0.08em; color: #cdbf92;
+      text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+      white-space: nowrap; transition: opacity 1.2s ease;
+    }
+    #hint2.faded { opacity: 0; }
 
     /* ============ PANTALLA DE CARGA ============ */
     #boot {
@@ -334,6 +395,15 @@
       font-size: 0.95rem;
     }
     .mbtn.primary:hover { background: rgba(130, 175, 80, 0.5); }
+    .mbtn.danger {
+      color: #e8a9a0;
+      border-color: rgba(230, 150, 140, 0.3);
+      font-size: 0.72rem;
+    }
+    .mbtn.danger:hover {
+      background: rgba(160, 60, 45, 0.3);
+      border-color: rgba(235, 160, 150, 0.7);
+    }
 
     .quality { margin-top: 2.2rem; }
     .q-label { font-size: 0.64rem; letter-spacing: 0.32em; color: var(--ink-faint); }
@@ -471,6 +541,10 @@
       <span class="res-item res-money">💰 <b id="resMoney">$80</b></span>
       <span class="res-sep"></span>
       <span class="res-item res-wood">🪵 <b id="resWood">0</b></span>
+      <span class="res-sep"></span>
+      <span id="clock">☀️ 09:07</span>
+      <span class="res-sep"></span>
+      <span id="saveDot">guardado</span>
     </div>
     <div id="prompt" class="hud-card hidden"><kbd id="promptKey">E</kbd><span id="promptText"></span></div>
     <div id="speedo" class="hud-card hidden"><b id="speedVal">0</b><span>km/h</span><kbd>F</kbd><span>bajar</span></div>
@@ -478,6 +552,7 @@
     <div id="xpwrap" class="hud-card"><span id="xpLevel">NV 1</span><div id="xpBar"><div id="xpFill" style="width:0%"></div></div></div>
     <div id="toasts"></div>
     <div id="hint">WASD moverse &middot; Shift correr &middot; E recoger/vender &middot; F coche &middot; B construir &middot; Clic talar &middot; Esc men&uacute;</div>
+    <div id="hint2">En tu parcela: B construir &middot; Q/Z nivel &middot; G m&aacute;s plantas &middot; H s&oacute;tano</div>
   </div>
 
   <!-- ==================== PANTALLA DE CARGA ==================== -->
@@ -513,6 +588,7 @@
         <button id="btnMissions" class="mbtn" type="button">MISIONES</button>
         <button id="btnControls" class="mbtn" type="button">CONTROLES</button>
         <button id="btnCredits" class="mbtn" type="button">CR&Eacute;DITOS</button>
+        <button id="btnReset" class="mbtn danger" type="button">BORRAR PARTIDA</button>
       </nav>
       <div class="quality">
         <span class="q-label">CALIDAD GR&Aacute;FICA</span>
@@ -546,10 +622,14 @@
         <span class="k"><kbd>E</kbd></span><span class="a">Recoger objetos &middot; vender madera en el aserradero</span>
         <span class="k"><kbd>Clic izq.</kbd></span><span class="a">Talar &aacute;rboles con el hacha</span>
         <span class="k"><kbd>F</kbd></span><span class="a">Subir / bajar de los coches del pueblo</span>
-        <span class="k"><kbd>B</kbd></span><span class="a">Modo construcci&oacute;n de tu casa</span>
-        <span class="k"><kbd>1</kbd>&ndash;<kbd>5</kbd> <kbd>R</kbd> <kbd>T</kbd> <kbd>Y</kbd></span><span class="a">Elegir pieza &middot; rotar &middot; madera/piedra &middot; color</span>
+        <span class="k"><kbd>B</kbd></span><span class="a">Modo construcci&oacute;n de tu casa (en tu parcela)</span>
+        <span class="k"><kbd>1</kbd>&ndash;<kbd>6</kbd></span><span class="a">Pieza: tarima, pared, puerta, ventana, escalera, techo</span>
+        <span class="k"><kbd>Q</kbd> / <kbd>Z</kbd></span><span class="a">Subir / bajar de nivel (plantas y s&oacute;tano)</span>
+        <span class="k"><kbd>G</kbd></span><span class="a">Comprar la siguiente planta de tu casa</span>
+        <span class="k"><kbd>H</kbd></span><span class="a">Comprar el s&oacute;tano (se excava la parcela)</span>
+        <span class="k"><kbd>R</kbd> <kbd>T</kbd> <kbd>Y</kbd></span><span class="a">Rotar &middot; madera/piedra/ladrillo &middot; color</span>
         <span class="k"><kbd>X</kbd></span><span class="a">Demoler (devuelve la mitad del coste)</span>
-        <span class="k"><kbd>Esc</kbd></span><span class="a">Pausa / men&uacute;</span>
+        <span class="k"><kbd>Esc</kbd></span><span class="a">Pausa / men&uacute; &middot; la partida se guarda sola</span>
         <span class="k"><kbd>Rat&oacute;n</kbd></span><span class="a">Mirar alrededor</span>
       </div>
     </div>

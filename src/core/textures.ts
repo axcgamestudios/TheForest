@@ -518,3 +518,528 @@ export function softDotTexture(): THREE.CanvasTexture {
   ctx.fillRect(0, 0, 64, 64);
   return toTexture(c);
 }
+
+/* ==========================================================================
+ *  Texturas para coches, manos, hacha y cabañas (todo procedural)
+ * ========================================================================== */
+
+/** Pintura de carrocería: color base con nubes de tono y motas metálicas. */
+export function carPaintTexture(color: number): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(256, 256);
+  const base = new THREE.Color(color);
+  const r = Math.round(base.r * 255);
+  const g = Math.round(base.g * 255);
+  const b = Math.round(base.b * 255);
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.fillRect(0, 0, 256, 256);
+  const rng = mulberry32(1337);
+  // Nubes de tono (chapa ondulada).
+  for (let i = 0; i < 26; i++) {
+    const y = rng() * 256;
+    const a = 0.02 + rng() * 0.04;
+    const light = rng() > 0.5;
+    ctx.strokeStyle = light
+      ? `rgba(255,255,255,${a})`
+      : `rgba(0,0,0,${a})`;
+    ctx.lineWidth = 6 + rng() * 20;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(80, y + rng() * 14 - 7, 180, y + rng() * 14 - 7, 256, y);
+    ctx.stroke();
+  }
+  // Motas metálicas.
+  for (let i = 0; i < 900; i++) {
+    const v = rng() > 0.5 ? 255 : 40;
+    ctx.fillStyle = `rgba(${v},${v},${v},0.06)`;
+    ctx.fillRect(rng() * 256, rng() * 256, 1.3, 1.3);
+  }
+  return toTexture(c);
+}
+
+/** Mapa de rugosidad de la pintura: brillo con grano fino (no sRGB). */
+export function carPaintRough(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(128, 128);
+  const rng = mulberry32(4242);
+  ctx.fillStyle = 'rgb(86,86,86)';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 700; i++) {
+    const v = 60 + Math.floor(rng() * 60);
+    ctx.fillStyle = `rgba(${v},${v},${v},0.5)`;
+    ctx.fillRect(rng() * 128, rng() * 128, 1, 1);
+  }
+  const t = toTexture(c, false);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Neumático: goma oscura con ranuras diagonales y banda lateral. */
+export function tireTreadTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(128, 128);
+  ctx.fillStyle = '#191a1c';
+  ctx.fillRect(0, 0, 128, 128);
+  // Ranuras diagonales del rodadura.
+  ctx.strokeStyle = '#0a0a0b';
+  ctx.lineWidth = 7;
+  for (let x = -128; x < 256; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 64, 128);
+    ctx.stroke();
+  }
+  // Bloques entre ranuras (brillo sutil).
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 4;
+  for (let x = -128; x < 256; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x + 9, 0);
+    ctx.lineTo(x + 73, 128);
+    ctx.stroke();
+  }
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 1);
+  return t;
+}
+
+/**
+ * Piel realista y cálida para las manos: tono saturado (no pálido), poros,
+ * moteado, venas tenues, pliegues de nudillos y bordes sonrojados.
+ */
+export function skinTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(512, 512);
+  const rng = mulberry32(97531);
+  // Base cálida y saturada con gradiente radial (centro más claro, bordes
+  // más morenos: combate el aspecto "pálido" a plena luz del día).
+  const g = ctx.createRadialGradient(256, 240, 60, 256, 256, 320);
+  g.addColorStop(0, '#c08463');
+  g.addColorStop(0.55, '#b0714f');
+  g.addColorStop(1, '#93543a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Moteado de la piel (manchas rojizas y amarronadas más presentes).
+  for (let i = 0; i < 130; i++) {
+    const x = rng() * 512;
+    const y = rng() * 512;
+    const r = 14 + rng() * 42;
+    const warm = rng();
+    const col = warm > 0.6
+      ? `rgba(178,84,62,${0.05 + rng() * 0.08})`
+      : warm > 0.25
+        ? `rgba(134,70,46,${0.05 + rng() * 0.08})`
+        : `rgba(214,140,102,${0.04 + rng() * 0.07})`;
+    const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, col);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+
+  // Venas tenues verdosas-azuladas.
+  ctx.lineWidth = 1.6;
+  for (let i = 0; i < 10; i++) {
+    ctx.strokeStyle = `rgba(88,112,124,${0.06 + rng() * 0.06})`;
+    ctx.beginPath();
+    let x = rng() * 512;
+    let y = rng() * 512;
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 4; s++) {
+      x += (rng() - 0.5) * 90;
+      y += rng() * 60;
+      ctx.quadraticCurveTo(x + 12, y - 18, x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Poros (puntos finos oscuros y claros, más marcados).
+  for (let i = 0; i < 4600; i++) {
+    const dark = rng() > 0.35;
+    ctx.fillStyle = dark
+      ? `rgba(88,44,30,${0.07 + rng() * 0.1})`
+      : `rgba(232,172,138,${0.05 + rng() * 0.07})`;
+    ctx.fillRect(rng() * 512, rng() * 512, 1.4, 1.4);
+  }
+
+  // Vello fino (trazos cortos semitransparentes).
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 700; i++) {
+    const x = rng() * 512;
+    const y = rng() * 512;
+    const a = rng() * Math.PI * 2;
+    ctx.strokeStyle = `rgba(96,58,38,${0.06 + rng() * 0.09})`;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * 5, y + Math.sin(a) * 5);
+    ctx.stroke();
+  }
+
+  // Pliegues de nudillos: trazos curvos en pares, más contrastados.
+  for (let i = 0; i < 46; i++) {
+    const x = rng() * 512;
+    const y = rng() * 512;
+    ctx.strokeStyle = `rgba(104,52,36,${0.14 + rng() * 0.12})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(x, y, 5 + rng() * 5, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + 2, y + 8 + rng() * 4, 4 + rng() * 4, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+  }
+
+  // Sonrojo en los bordes (nudillos y falanges) más presente.
+  const blush = 'rgba(196,80,58,0.10)';
+  ctx.fillStyle = blush;
+  ctx.fillRect(0, 0, 512, 34);
+  ctx.fillRect(0, 478, 512, 34);
+  ctx.fillRect(0, 0, 34, 512);
+  ctx.fillRect(478, 0, 34, 512);
+
+  const t = toTexture(c);
+  t.wrapS = THREE.ClampToEdgeWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/** Relieve de la piel (bump): poros hundidos y pliegues marcados. */
+export function skinBumpTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(512, 512);
+  const rng = mulberry32(22222);
+  ctx.fillStyle = 'rgb(128,128,128)';
+  ctx.fillRect(0, 0, 512, 512);
+  // Poros hundidos.
+  for (let i = 0; i < 2600; i++) {
+    const v = 90 + Math.floor(rng() * 40);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(rng() * 512, rng() * 512, 1.6, 1.6);
+  }
+  // Pliegues de nudillos (valles).
+  for (let i = 0; i < 46; i++) {
+    ctx.strokeStyle = `rgba(60,60,60,${0.35 + rng() * 0.25})`;
+    ctx.lineWidth = 2.4;
+    const x = rng() * 512;
+    const y = rng() * 512;
+    ctx.beginPath();
+    ctx.arc(x, y, 6 + rng() * 6, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+  }
+  const t = toTexture(c, false);
+  t.wrapS = THREE.ClampToEdgeWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/** Veta de madera encerada para el mango del hacha (cálida y viva). */
+export function axeWoodTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(256, 256);
+  const rng = mulberry32(5533);
+  ctx.fillStyle = '#a87844';
+  ctx.fillRect(0, 0, 256, 256);
+  // Vetas verticales onduladas.
+  for (let i = 0; i < 30; i++) {
+    const x = rng() * 256;
+    const shade = 118 + rng() * 60;
+    ctx.strokeStyle = `rgba(${shade + 40},${shade},${shade - 45},${0.25 + rng() * 0.35})`;
+    ctx.lineWidth = 0.8 + rng() * 2.4;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    let cx = x;
+    for (let y = 0; y < 256; y += 32) {
+      cx += (rng() - 0.5) * 7;
+      ctx.lineTo(cx, y + 16);
+    }
+    ctx.stroke();
+  }
+  // Ojos de la madera (nudos).
+  for (let i = 0; i < 4; i++) {
+    const x = rng() * 256;
+    const y = rng() * 256;
+    const rg = ctx.createRadialGradient(x, y, 1, x, y, 7 + rng() * 5);
+    rg.addColorStop(0, 'rgba(70,40,18,0.8)');
+    rg.addColorStop(0.6, 'rgba(120,74,38,0.4)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(x - 14, y - 14, 28, 28);
+  }
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Cuero trenzado para la empuñadura del hacha. */
+export function leatherTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(128, 128);
+  const rng = mulberry32(8841);
+  ctx.fillStyle = '#5c3a24';
+  ctx.fillRect(0, 0, 128, 128);
+  // Textura de poro de cuero + costura diagonal.
+  for (let i = 0; i < 1500; i++) {
+    const v = 60 + Math.floor(rng() * 50);
+    ctx.fillStyle = `rgba(${v},${Math.floor(v * 0.62)},${Math.floor(v * 0.4)},0.4)`;
+    ctx.fillRect(rng() * 128, rng() * 128, 1.4, 1.4);
+  }
+  ctx.strokeStyle = 'rgba(208,180,130,0.85)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 5]);
+  for (let x = -128; x < 256; x += 34) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 128, 128);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  return toTexture(c);
+}
+
+/** Acero cepillado para cabezas de herramientas (rayado fino). */
+export function brushedSteelTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(128, 128);
+  const rng = mulberry32(64064);
+  ctx.fillStyle = 'rgb(168,172,178)';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 700; i++) {
+    const v = 120 + Math.floor(rng() * 90);
+    ctx.strokeStyle = `rgba(${v},${v + 3},${v + 8},0.5)`;
+    ctx.lineWidth = 0.7;
+    const y = rng() * 128;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(128, y + (rng() - 0.5) * 3);
+    ctx.stroke();
+  }
+  const t = toTexture(c, false);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/**
+ * Atlas de materiales del pueblo (una sola textura, 3 bandas verticales):
+ *  [0] madera de troncos y tablones · [1] tejas del techo · [2] piedra.
+ * Cada geometría mapea su UV a su banda con atlasBand().
+ */
+export function cabinAtlasTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(1024, 1024);
+  const rng = mulberry32(20240);
+  const BAND = 341;
+
+  // ---- Banda 0: madera clara (se tiñe con el color por vértice) ----
+  for (let band = 0; band < 3; band++) {
+    const y0 = band * BAND;
+    ctx.save();
+    ctx.translate(0, y0);
+    ctx.beginPath();
+    ctx.rect(0, 0, 1024, BAND);
+    ctx.clip();
+
+    if (band === 0) {
+      ctx.fillStyle = '#d9cdb8';
+      ctx.fillRect(0, 0, 1024, BAND);
+      // Vetas verticales largas y suaves.
+      for (let i = 0; i < 260; i++) {
+        const x = rng() * 1024;
+        const a = 0.06 + rng() * 0.16;
+        ctx.strokeStyle = rng() > 0.5
+          ? `rgba(150,120,82,${a})`
+          : `rgba(236,226,204,${a * 0.8})`;
+        ctx.lineWidth = 0.7 + rng() * 2.6;
+        ctx.beginPath();
+        ctx.moveTo(x, -6);
+        let cx = x;
+        for (let y = 0; y < BAND + 12; y += 26) {
+          cx += (rng() - 0.5) * 9;
+          ctx.lineTo(cx, y);
+        }
+        ctx.stroke();
+      }
+      // Nudos ocasionales.
+      for (let i = 0; i < 9; i++) {
+        const x = rng() * 1024;
+        const y = rng() * BAND;
+        const rg = ctx.createRadialGradient(x, y, 1, x, y, 9);
+        rg.addColorStop(0, 'rgba(120,88,52,0.55)');
+        rg.addColorStop(0.65, 'rgba(160,128,88,0.25)');
+        rg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = rg;
+        ctx.fillRect(x - 12, y - 12, 24, 24);
+      }
+      // Juntas verticales de tablones.
+      for (let x = 0; x < 1024; x += 116) {
+        ctx.fillStyle = 'rgba(96,72,44,0.35)';
+        ctx.fillRect(x + rng() * 8, 0, 2.4, BAND);
+      }
+    }
+
+    if (band === 1) {
+      // ---- Banda 1: tejas de madera (cursos verticales en el atlas) ----
+      ctx.fillStyle = '#cbb9a0';
+      ctx.fillRect(0, 0, 1024, BAND);
+      const course = 74;
+      for (let x = 0; x < 1024; x += course) {
+        // Sombra bajo el canto del curso.
+        const g = ctx.createLinearGradient(x, 0, x + course, 0);
+        g.addColorStop(0, 'rgba(74,52,32,0.34)');
+        g.addColorStop(0.25, 'rgba(120,92,60,0.12)');
+        g.addColorStop(0.9, 'rgba(255,244,224,0.10)');
+        g.addColorStop(1, 'rgba(60,42,26,0.30)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, 0, course, BAND);
+        ctx.fillStyle = 'rgba(70,48,30,0.4)';
+        ctx.fillRect(x, 0, 2, BAND);
+        // Escamas del curso con variación.
+        for (let y = 0; y < BAND; y += 46) {
+          const off = ((y / 46) % 2) * 23;
+          ctx.fillStyle = `rgba(${150 + rng() * 40},${120 + rng() * 30},${86 + rng() * 24},0.18)`;
+          ctx.beginPath();
+          ctx.moveTo(x + 3, y + 44 + off * 0.2);
+          ctx.quadraticCurveTo(x + course / 2, y + 30 + off * 0.2, x + course - 3, y + 44 + off * 0.2);
+          ctx.lineTo(x + course - 3, y + 46);
+          ctx.lineTo(x + 3, y + 46);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    if (band === 2) {
+      // ---- Banda 2: piedra de mampostería ----
+      ctx.fillStyle = '#b7b2a8';
+      ctx.fillRect(0, 0, 1024, BAND);
+      // Hiladas con juntas escalonadas.
+      let y = 0;
+      let row = 0;
+      while (y < BAND) {
+        const h = 52 + rng() * 34;
+        let x = -20 + rng() * 30;
+        while (x < 1024) {
+          const w = 70 + rng() * 110;
+          const tone = 158 + rng() * 56;
+          ctx.fillStyle = `rgb(${tone},${tone - 6},${tone - 14})`;
+          roundRect(ctx, x, y, w, h, 7);
+          ctx.fill();
+          // Sombra inferior/luz superior.
+          ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x + 6, y + 2);
+          ctx.lineTo(x + w - 6, y + 2);
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(60,56,48,0.35)';
+          ctx.beginPath();
+          ctx.moveTo(x + 6, y + h - 2);
+          ctx.lineTo(x + w - 6, y + h - 2);
+          ctx.stroke();
+          x += w + 6;
+        }
+        y += h + 6;
+        row++;
+      }
+      // Manchas de musgo sutiles.
+      for (let i = 0; i < 40; i++) {
+        const x = rng() * 1024;
+        const yy = rng() * BAND;
+        const rg = ctx.createRadialGradient(x, yy, 1, x, yy, 10 + rng() * 22);
+        rg.addColorStop(0, `rgba(108,124,72,${0.14 + rng() * 0.2})`);
+        rg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = rg;
+        ctx.fillRect(x - 34, yy - 34, 68, 68);
+      }
+    }
+    ctx.restore();
+  }
+
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/** Rectángulo redondeado (path) para canvas. */
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/**
+ * Remapea los UV de una geometría a una banda del atlas (0..2).
+ * u se comprime para que el detalle no se estire demasiado en piezas largas.
+ */
+export function atlasBand(geo: THREE.BufferGeometry, band: number, uScale = 1): void {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    const u = (uv.getX(i) * uScale) % 1;
+    const v = (band + uv.getY(i)) / 3;
+    uv.setXY(i, Math.abs(u), v);
+  }
+  uv.needsUpdate = true;
+}
+
+/** Ladrillo visto con juntas de mortero (para el constructor). */
+export function brickTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(256, 256);
+  const rng = mulberry32(91021);
+  ctx.fillStyle = '#c8c2b4';
+  ctx.fillRect(0, 0, 256, 256);
+  const bh = 32;
+  for (let row = 0; row * bh < 256; row++) {
+    const off = (row % 2) * 32;
+    for (let x = -64 + off; x < 256; x += 64) {
+      const tone = 150 + rng() * 36;
+      ctx.fillStyle = `rgb(${tone},${Math.floor(tone * 0.62)},${Math.floor(tone * 0.48)})`;
+      roundRect(ctx, x + 2, row * bh + 2, 60, bh - 4, 3);
+      ctx.fill();
+      // Desigualdad por ladrillo.
+      ctx.fillStyle = `rgba(0,0,0,${0.04 + rng() * 0.07})`;
+      ctx.fillRect(x + 2, row * bh + bh - 8, 60, 4);
+    }
+  }
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Tablón de madera para el constructor (se tiñe con el color elegido). */
+export function plankTexture(): THREE.CanvasTexture {
+  const [c, ctx] = makeCanvas(256, 256);
+  const rng = mulberry32(4477);
+  ctx.fillStyle = '#d6cab2';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 70; i++) {
+    const x = rng() * 256;
+    const a = 0.08 + rng() * 0.18;
+    ctx.strokeStyle = rng() > 0.5 ? `rgba(142,112,74,${a})` : `rgba(240,232,212,${a})`;
+    ctx.lineWidth = 0.8 + rng() * 2.2;
+    ctx.beginPath();
+    ctx.moveTo(x, -4);
+    let cx = x;
+    for (let y = 0; y < 260; y += 34) {
+      cx += (rng() - 0.5) * 6;
+      ctx.lineTo(cx, y);
+    }
+    ctx.stroke();
+  }
+  for (let x = 0; x < 260; x += 52) {
+    ctx.fillStyle = 'rgba(90,66,40,0.3)';
+    ctx.fillRect(x, 0, 2, 256);
+  }
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}

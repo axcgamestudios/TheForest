@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { skinTexture, skinBumpTexture, axeWoodTexture, leatherTexture, brushedSteelTexture } from '../core/textures';
 
 /** Curvatura por articulación de un dedo (0 = recto, 1 = cerrado). */
 interface FingerCurl {
@@ -29,41 +30,22 @@ export interface HandsState {
   lastPickup: number;
 }
 
-const skinTexture = (() => {
-  let tex: THREE.CanvasTexture | null = null;
-  return (): THREE.CanvasTexture => {
-    if (tex) return tex;
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#d9a184';
-    ctx.fillRect(0, 0, 128, 128);
-    // Poros y moteado sutil de la piel.
-    for (let i = 0; i < 2600; i++) {
-      const v = Math.random();
-      ctx.fillStyle = `rgba(${v > 0.5 ? 150 : 225},${v > 0.5 ? 88 : 160},${v > 0.5 ? 66 : 135},0.05)`;
-      ctx.fillRect(Math.random() * 128, Math.random() * 128, 1.5, 1.5);
-    }
-    // Vetas tenues.
-    ctx.strokeStyle = 'rgba(178,110,86,0.10)';
-    for (let i = 0; i < 22; i++) {
-      ctx.beginPath();
-      const y = Math.random() * 128;
-      ctx.moveTo(0, y);
-      ctx.bezierCurveTo(40, y + 8, 90, y - 10, 128, y + 4);
-      ctx.stroke();
-    }
-    tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  };
-})();
+/** Materiales de piel y del hacha (compartidos entre ambas manos). */
+function makeSkinMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    map: skinTexture(),
+    bumpMap: skinBumpTexture(),
+    bumpScale: 0.05,
+    roughness: 0.46,
+    metalness: 0
+  });
+}
 
 /**
  * Manos en primera persona, moldeadas por código (palma redondeada, dedos
- * con 3 falanges y pulgar oponible) y animadas de forma procedural:
- * balanceo al caminar/correr, respiración, golpe de hacha y gesto de
- * alcanzar objetos. La mano derecha empuña el hacha.
+ * con 3 falanges y pulgar oponible, uñas y nudillos) y animadas de forma
+ * procedural: balanceo al caminar/correr, respiración, golpe de hacha
+ * diagonal y gesto de alcanzar objetos. La mano derecha empuña el hacha.
  */
 export class Hands {
   readonly group = new THREE.Group();
@@ -81,11 +63,20 @@ export class Hands {
   private time = 0;
 
   constructor(camera: THREE.PerspectiveCamera) {
-    const skin = new THREE.MeshStandardMaterial({
+    const skin = makeSkinMaterial();
+    const nailMat = new THREE.MeshStandardMaterial({
+      color: 0xd9ae9f,
+      roughness: 0.24,
+      metalness: 0.05
+    });
+    // Nudillos: MISMA piel texturizada, sólo un punto más rojiza (sin
+    // aspecto de bolitas pálidas).
+    const knuckleMat = new THREE.MeshStandardMaterial({
       map: skinTexture(),
-      color: 0xffffff,
-      roughness: 0.62,
-      metalness: 0
+      color: 0xc98a70,
+      bumpMap: skinBumpTexture(),
+      bumpScale: 0.04,
+      roughness: 0.5
     });
     const sleeve = new THREE.MeshStandardMaterial({
       color: 0x3d4a33,
@@ -93,19 +84,21 @@ export class Hands {
       metalness: 0
     });
 
-    this.right = this.buildHand(skin, sleeve, false);
-    this.left = this.buildHand(skin, sleeve, true);
+    this.right = this.buildHand(skin, nailMat, knuckleMat, sleeve, false);
+    this.left = this.buildHand(skin, nailMat, knuckleMat, sleeve, true);
 
-    // Reposo: derecha algo adelantada empuñando el hacha.
-    this.right.root.position.set(0.24, -0.26, -0.46);
-    this.right.root.rotation.set(-0.55, -0.32, 0.18);
-    this.left.root.position.set(-0.26, -0.3, -0.42);
-    this.left.root.rotation.set(-0.5, 0.35, -0.22);
+    // Reposo: manos bajas y relajadas, estilo "listero"; la derecha empuña
+    // el hacha en diagonal, con la cabeza arriba a la derecha de la vista.
+    this.right.root.position.set(0.27, -0.36, -0.52);
+    this.right.root.rotation.set(-0.3, -0.18, 0.1);
+    this.left.root.position.set(-0.24, -0.4, -0.46);
+    this.left.root.rotation.set(-0.34, 0.22, -0.14);
 
     this.axe = this.buildAxe();
-    // El hacha se acopla a la palma derecha apuntando hacia adelante-abajo.
-    this.axe.position.set(0, 0.015, 0.02);
-    this.axe.rotation.set(Math.PI / 2 + 0.25, 0, 0);
+    // El hacha se acopla a la palma derecha: el mango sale hacia arriba
+    // ligeramente adelantado, cabeza arriba, filo mirando al frente.
+    this.axe.position.set(0.01, 0.02, 0.02);
+    this.axe.rotation.set(0.36, -0.1, -0.18);
     this.right.palm.add(this.axe);
 
     this.group.add(this.right.root, this.left.root);
@@ -154,36 +147,38 @@ export class Hands {
     // Poses base.
     this.applyPose(
       this.right,
-      { a: 0.78, b: 0.85, c: 0.8 }, // empuñando el hacha
-      0.45,
-      0.5
+      { a: 0.8, b: 0.85, c: 0.8 }, // empuñando el hacha
+      0.5,
+      0.45
     );
-    this.applyPose(this.left, { a: 0.22, b: 0.3, c: 0.26 }, 0.25, 0.35);
+    // Mano izquierda relajada: dedos semicerrados hacia dentro (natural,
+    // no extendida en abanico).
+    this.applyPose(this.left, { a: 0.42, b: 0.52, c: 0.46 }, 0.34, 0.3);
 
     this.right.root.position.set(
-      0.24 + walkR * sprintMul * 0.6 + idleX,
-      -0.26 + liftR * sprintMul + idleY,
-      -0.46 + Math.max(walkR, 0) * 0.16 * sprintMul
+      0.27 + walkR * sprintMul * 0.6 + idleX,
+      -0.36 + liftR * sprintMul + idleY,
+      -0.52 + Math.max(walkR, 0) * 0.16 * sprintMul
     );
     this.left.root.position.set(
-      -0.26 + walkL * sprintMul * 0.6 - idleX,
-      -0.3 + liftL * sprintMul - idleY,
-      -0.42 + Math.max(walkL, 0) * 0.16 * sprintMul
+      -0.24 + walkL * sprintMul * 0.6 - idleX,
+      -0.4 + liftL * sprintMul - idleY,
+      -0.46 + Math.max(walkL, 0) * 0.16 * sprintMul
     );
-    this.right.root.rotation.set(-0.55, -0.32, 0.18 + walkR * 0.35 * sprintMul);
-    this.left.root.rotation.set(-0.5, 0.35, -0.22 + walkL * 0.35 * sprintMul);
+    this.right.root.rotation.set(-0.3, -0.18, 0.1 + walkR * 0.35 * sprintMul);
+    this.left.root.rotation.set(-0.34, 0.22, -0.14 + walkL * 0.35 * sprintMul);
 
     // --- Gesto de alcanzar (recoger con E): ambos brazos se extienden ---
     const sincePick = this.time - s.lastPickup;
     if (sincePick >= 0 && sincePick < 0.5) {
       const k = Math.sin((sincePick / 0.5) * Math.PI);
-      this.left.root.position.z -= k * 0.16;
-      this.left.root.position.y += k * 0.07;
+      this.left.root.position.z -= k * 0.18;
+      this.left.root.position.y += k * 0.08;
       this.left.root.rotation.x += k * 0.5;
       this.right.root.position.z -= k * 0.08;
     }
 
-    // --- Golpe de hacha (sólo el brazo derecho) ---
+    // --- Golpe de hacha diagonal (brazo derecho) ---
     if (this.swingT >= 0) {
       const prev = this.swingT;
       this.swingT += dt / 0.62;
@@ -196,14 +191,18 @@ export class Hands {
       const raise = t < 0.42 ? wind : Math.max(0, 1 - (t - 0.42) / 0.3);
       const ease = wind * wind * (3 - 2 * wind);
 
-      this.right.root.position.y += ease * 0.22;
-      this.right.root.position.z += ease * 0.1;
-      this.right.root.rotation.x -= raise * 0.95;
-      this.right.root.rotation.z -= ease * 0.5;
+      this.right.root.position.y += ease * 0.26;
+      this.right.root.position.x += ease * 0.05;
+      this.right.root.position.z += ease * 0.12;
+      // El brazo se arma hacia atrás-arriba y cae en diagonal.
+      this.right.root.rotation.x -= raise * 0.85;
+      this.right.root.rotation.y += raise * 0.16;
+      this.right.root.rotation.z += ease * 0.38;
       // La mano izquierda acompaña al hacha con el doble grip en el armado.
       if (t < 0.5) {
-        this.left.root.position.x += ease * 0.06;
-        this.left.root.position.y += ease * 0.1;
+        this.left.root.position.x += ease * 0.08;
+        this.left.root.position.y += ease * 0.12;
+        this.left.root.rotation.z += ease * 0.2;
       }
 
       // Impacto.
@@ -229,22 +228,34 @@ export class Hands {
   }
 
   /**
-   * Construye una mano: palma redondeada + 4 dedos de 3 falanges + pulgar
-   * de 2, todos con pivotes en las articulaciones (para animar curl).
+   * Construye una mano: palma redondeada + 4 dedos de 3 falanges con
+   * nudillos y uñas + pulgar de 2 falanges + muñequera.
    */
-  private buildHand(skin: THREE.Material, sleeve: THREE.Material, mirror: boolean): HandRig {
+  private buildHand(
+    skin: THREE.Material,
+    nailMat: THREE.Material,
+    knuckleMat: THREE.Material,
+    sleeve: THREE.Material,
+    mirror: boolean
+  ): HandRig {
     const root = new THREE.Group();
     const palm = new THREE.Group();
     root.add(palm);
 
-    // Palma: caja redondeada ligeramente más estrecha hacia la muñeca.
-    const palmMesh = new THREE.Mesh(new RoundedBoxGeometry(0.088, 0.105, 0.052, 3, 0.016), skin);
+    // Palma: caja redondeada más estrecha hacia la muñeca.
+    const palmMesh = new THREE.Mesh(new RoundedBoxGeometry(0.09, 0.108, 0.054, 3, 0.017), skin);
     palm.add(palmMesh);
 
-    // Nudillos (volumen sutil en el borde superior).
-    const knuckles = new THREE.Mesh(new RoundedBoxGeometry(0.09, 0.03, 0.05, 2, 0.012), skin);
+    // Nudillos (volumen en el borde superior).
+    const knuckles = new THREE.Mesh(new RoundedBoxGeometry(0.092, 0.032, 0.052, 2, 0.013), knuckleMat);
     knuckles.position.set(0, 0.052, 0);
     palm.add(knuckles);
+
+    // Eminencia tenar (base del pulgar, hace de la palma algo "moldeada").
+    const thenar = new THREE.Mesh(new THREE.SphereGeometry(0.031, 10, 8), skin);
+    thenar.scale.set(1, 1.25, 0.62);
+    thenar.position.set(mirror ? 0.04 : -0.04, 0.02, 0.018);
+    palm.add(thenar);
 
     // Pulgar (a un lado, apuntando hacia la palma).
     const thumbBase = new THREE.Group();
@@ -259,8 +270,14 @@ export class Hands {
     const thumbSeg2 = new THREE.Mesh(new RoundedBoxGeometry(0.042, 0.022, 0.024, 2, 0.009), skin);
     thumbSeg2.position.x = mirror ? 0.021 : -0.021;
     thumbMid.add(thumbSeg2);
+    // Uña del pulgar.
+    const thumbNail = new THREE.Mesh(new RoundedBoxGeometry(0.008, 0.013, 0.008, 1, 0.003), nailMat);
+    thumbNail.position.set(mirror ? 0.03 : -0.03, 0.004, -0.013);
+    thumbNail.rotation.z = mirror ? 0 : 0;
+    thumbNail.rotation.x = Math.PI / 2;
+    thumbMid.add(thumbNail);
 
-    // Cuatro dedos: base (metacarpo) -> media -> punta.
+    // Cuatro dedos: base (metacarpo) -> media -> punta, con nudillos y uñas.
     const fingers: HandRig['fingers'] = [];
     const lens = [0.052, 0.06, 0.056, 0.046];
     for (let i = 0; i < 4; i++) {
@@ -292,45 +309,141 @@ export class Hands {
       seg3.position.y = l3 / 2;
       tip.add(seg3);
 
+      // Nudillos en las dos articulaciones (volumen + tono).
+      for (const [pivot, r] of [
+        [mid, 0.0115],
+        [tip, 0.0095]
+      ] as [THREE.Group, number][]) {
+        const kn = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), knuckleMat);
+        kn.scale.set(0.9, 0.55, 0.75);
+        kn.position.set(0, -0.001, -0.009);
+        pivot.add(kn);
+      }
+
+      // Uña en el dorso de la punta.
+      const nail = new THREE.Mesh(new RoundedBoxGeometry(0.0115, 0.009, 0.0125, 1, 0.003), nailMat);
+      nail.position.set(0, l3 * 0.68, -0.009);
+      tip.add(nail);
+
       fingers.push({ base, mid, tip });
     }
 
-    // Manga de la chaqueta en la muñeca.
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.06, 0.075, 10), sleeve);
-    cuff.position.y = -0.05;
+    // Manga de la chaqueta en la muñeca (dobladillo con borde).
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.062, 0.08, 12), sleeve);
+    cuff.position.y = -0.052;
     palm.add(cuff);
+    const cuffEdge = new THREE.Mesh(new THREE.TorusGeometry(0.054, 0.008, 6, 12), knuckleMat);
+    cuffEdge.position.y = -0.012;
+    cuffEdge.rotation.x = Math.PI / 2;
+    palm.add(cuffEdge);
 
     if (mirror) palm.rotation.y = Math.PI;
 
     return { root, palm, fingers, thumb: { base: thumbBase, mid: thumbMid } };
   }
 
-  /** Hacha: mango de madera + cabeza de acero con filo. */
+  /**
+   * Hacha de leñador: mango con veta y empuñadura de cuero, cabeza de acero
+   * con perfil extruido, filo pulido brillante, cuña superior y estribo.
+   */
   private buildAxe(): THREE.Group {
     const g = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.8 });
-    const steel = new THREE.MeshStandardMaterial({
-      color: 0xb9c1c6,
-      roughness: 0.32,
-      metalness: 0.85
+
+    const woodTex = axeWoodTexture();
+    const woodMat = new THREE.MeshStandardMaterial({
+      map: woodTex,
+      bumpMap: woodTex,
+      bumpScale: 0.012,
+      roughness: 0.62,
+      metalness: 0.04
+    });
+    const leatherMat = new THREE.MeshStandardMaterial({
+      map: leatherTexture(),
+      roughness: 0.85
+    });
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: 0xc8ced6,
+      roughnessMap: brushedSteelTexture(),
+      roughness: 0.34,
+      metalness: 0.92,
+      envMapIntensity: 1.15
+    });
+    // Filo pulido: acero más claro y espejado para que "corte" a la vista.
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: 0xeef2f6,
+      roughness: 0.12,
+      metalness: 0.98,
+      envMapIntensity: 1.6
     });
 
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.52, 8), wood);
-    handle.position.y = 0.26;
-    g.add(handle);
+    // ---- Mango ligeramente curvado (dos tramos) ----
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.36, 14), woodMat);
+    lower.position.y = 0.18;
+    lower.rotation.z = 0.02;
+    g.add(lower);
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.017, 0.24, 14), woodMat);
+    upper.position.y = 0.44;
+    upper.rotation.z = -0.03;
+    g.add(upper);
 
-    const head = new THREE.Group();
-    head.position.y = 0.5;
-    // Cabeza: bloque + filo biselado.
-    const block = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.075, 0.11, 2, 0.01), steel);
-    head.add(block);
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.075, 0.115), steel);
-    blade.position.z = -0.088;
-    // Bisel del filo: escala en Z decreciente simulada con un segundo bloque.
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.082, 0.05), steel);
-    edge.position.z = -0.145;
-    head.add(blade, edge);
+    // Empuñadura de cuero trenzado abajo.
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.0205, 0.0215, 0.13, 14), leatherMat);
+    grip.position.y = 0.075;
+    g.add(grip);
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0035, 8, 18), leatherMat);
+      ring.position.y = 0.02 + i * 0.042;
+      ring.rotation.x = Math.PI / 2;
+      g.add(ring);
+    }
+    // Pomo del mango.
+    const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.018, 0.02, 14), leatherMat);
+    butt.position.y = 0.008;
+    g.add(butt);
+
+    // ---- Cabeza: perfil extruido con bisel (filo real) ----
+    const s = new THREE.Shape();
+    s.moveTo(0.055, -0.05);
+    s.lineTo(0.055, 0.05);
+    s.quadraticCurveTo(-0.02, 0.072, -0.078, 0.055);
+    s.quadraticCurveTo(-0.152, 0.022, -0.176, 0.0);
+    s.quadraticCurveTo(-0.168, -0.022, -0.152, -0.042);
+    s.quadraticCurveTo(-0.07, -0.072, 0.055, -0.05);
+
+    const headGeo = new THREE.ExtrudeGeometry(s, {
+      depth: 0.03,
+      bevelEnabled: true,
+      bevelThickness: 0.008,
+      bevelSize: 0.011,
+      bevelSegments: 2,
+      curveSegments: 10
+    });
+    // El perfil mira a -X; lo llevamos a -Z (frente del hacha) y centramos.
+    headGeo.rotateY(Math.PI / 2);
+    headGeo.translate(0.012, 0.52, -0.008);
+    const head = new THREE.Mesh(headGeo, steelMat);
     g.add(head);
+
+    // Filo pulido: tira fina pegada al borde de corte (lado -X del perfil).
+    const edge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.012, 0.105, 0.026),
+      edgeMat
+    );
+    edge.position.set(-0.152, 0.52, 0.007);
+    edge.rotation.z = 0.42;
+    g.add(edge);
+
+    // Refuerzo del ojo (abrazadera de acero sobre el mango).
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.045, 12), steelMat);
+    collar.position.y = 0.5;
+    g.add(collar);
+
+    // Cuña de madera asomando por arriba del ojo.
+    const wedge = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.03, 0.028), woodMat);
+    wedge.position.y = 0.565;
+    wedge.rotation.y = 0.3;
+    g.add(wedge);
+
     return g;
   }
 }

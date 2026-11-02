@@ -22,6 +22,9 @@ export const SUMMIT = { x: -70, z: -170 };
 /** Claro del pueblo del valle: los árboles evitan esta zona. */
 export const VILLAGE = { x: 56, z: 122, r: 40 };
 
+/** Parcela del jugador para construir su casa (16 × 16 m, sin árboles). */
+export const PLOT = { x: 28, z: 124, half: 8 };
+
 /** Aserradero: punto de venta de madera. */
 export const SAWMILL = { x: 52, z: 118, r: 6 };
 
@@ -175,6 +178,99 @@ export class Heightfield {
   /** Altura interpolada bilinealmente (para colisión del jugador, scatter, etc.). */
   sampleHeight(x: number, z: number): number {
     return this.bilinear(this.heights, x, z);
+  }
+
+  /**
+   * Excava una zona rectangular del terreno (sótano de la parcela): baja
+   * las muestras dentro del rect hasta una profundidad plana con borde
+   * suavizado (feather), quita el pasto de la máscara y refresca la
+   * textura para que el terreno, el pasto y las colisiones lo sigan.
+   */
+  carve(cx: number, cz: number, halfW: number, halfD: number, floorY: number, feather = 1.6): void {
+    const n = FIELD_RES;
+    const step = WORLD_SIZE / (n - 1);
+    const x0 = Math.max(0, Math.floor((cx - halfW - feather + HALF) / step));
+    const x1 = Math.min(n - 1, Math.ceil((cx + halfW + feather + HALF) / step));
+    const z0 = Math.max(0, Math.floor((cz - halfD - feather + HALF) / step));
+    const z1 = Math.min(n - 1, Math.ceil((cz + halfD + feather + HALF) / step));
+    const data = this.texture.image.data as Uint16Array;
+
+    for (let iz = z0; iz <= z1; iz++) {
+      const z = -HALF + iz * step;
+      for (let ix = x0; ix <= x1; ix++) {
+        const x = -HALF + ix * step;
+        const dx = Math.max(Math.abs(x - cx) - halfW, 0);
+        const dz = Math.max(Math.abs(z - cz) - halfD, 0);
+        const d = Math.hypot(dx, dz);
+        if (d >= feather) continue;
+        // 1 dentro del rect · 0 en el borde del feather.
+        const t = d <= 0 ? 1 : 1 - d / feather;
+        const s = t * t * (3 - 2 * t);
+        const i = iz * n + ix;
+        const orig = this.heights[i];
+        const target = orig + (floorY - orig) * s;
+        if (target < orig) this.heights[i] = target;
+        // Sin pasto dentro de la excavación y su talud.
+        if (s > 0.25) this.mask[i] = Math.min(this.mask[i], 1 - s);
+        data[i * 4 + 0] = THREE.DataUtils.toHalfFloat(this.heights[i]);
+        data[i * 4 + 1] = THREE.DataUtils.toHalfFloat(this.mask[i]);
+      }
+    }
+    this.texture.needsUpdate = true;
+  }
+
+  /**
+   * Excava una trinchera-rampa entre dos puntos (acceso al sótano): la
+   * profundidad crece linealmente de 0 (entrada) a `depth` (fondo), con el
+   * mismo suavizado y refresco de textura que carve().
+   */
+  carveRamp(
+    x1: number, z1: number,
+    x2: number, z2: number,
+    halfW: number, depth: number, floorY: number, feather = 1.4
+  ): void {
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    if (len < 0.01) return;
+    const nx = (x2 - x1) / len;
+    const nz = (z2 - z1) / len;
+    const pad = halfW + feather + 1;
+    const minX = Math.min(x1, x2) - pad;
+    const maxX = Math.max(x1, x2) + pad;
+    const minZ = Math.min(z1, z2) - pad;
+    const maxZ = Math.max(z1, z2) + pad;
+    const n = FIELD_RES;
+    const step = WORLD_SIZE / (n - 1);
+    const ix0 = Math.max(0, Math.floor((minX + HALF) / step));
+    const ix1 = Math.min(n - 1, Math.ceil((maxX + HALF) / step));
+    const iz0 = Math.max(0, Math.floor((minZ + HALF) / step));
+    const iz1 = Math.min(n - 1, Math.ceil((maxZ + HALF) / step));
+    const data = this.texture.image.data as Uint16Array;
+
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const z = -HALF + iz * step;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const x = -HALF + ix * step;
+        // Proyección sobre la línea de la rampa.
+        const t = THREE.MathUtils.clamp(((x - x1) * nx + (z - z1) * nz) / len, 0, 1);
+        const px = x1 + (x2 - x1) * t;
+        const pz = z1 + (z2 - z1) * t;
+        const d = Math.hypot(x - px, z - pz);
+        const lateral = Math.max(d - halfW, 0);
+        if (lateral >= feather) continue;
+        const lt = lateral <= 0 ? 1 : 1 - lateral / feather;
+        const ls = lt * lt * (3 - 2 * lt);
+        const depthHere = depth * t * ls;
+        if (depthHere <= 0.001) continue;
+        const i = iz * n + ix;
+        const orig = this.heights[i];
+        const target = Math.max(floorY, orig - depthHere);
+        if (target < orig) this.heights[i] = target;
+        if (depthHere > 0.5) this.mask[i] = Math.min(this.mask[i], 0.35);
+        data[i * 4 + 0] = THREE.DataUtils.toHalfFloat(this.heights[i]);
+        data[i * 4 + 1] = THREE.DataUtils.toHalfFloat(this.mask[i]);
+      }
+    }
+    this.texture.needsUpdate = true;
   }
 
   /** Máscara de pasto interpolada (1 = pasto, 0 = tierra/roca). */

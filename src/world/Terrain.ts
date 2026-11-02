@@ -20,6 +20,8 @@ export interface TerrainSystem {
   group: THREE.Group;
   /** Activa el chunk de detalle o el ligero según la distancia a la cámara. */
   update: (camPos: THREE.Vector3) => void;
+  /** Reconstruye los chunks que tocan un área del mundo (excavaciones). */
+  rebuildAt: (x: number, z: number, pad: number) => void;
 }
 
 /** Carga la textura de relieve horneada por tools/bake-relief.mjs. */
@@ -226,7 +228,23 @@ export async function createTerrain(field: Heightfield): Promise<TerrainSystem> 
     }
   };
 
-  return { group, update };
+  /** Vuelve a muestrear los vértices de los chunks que rozan el área. */
+  const rebuildAt = (x: number, z: number, pad: number): void => {
+    const cs = CHUNK_SIZE;
+    const cx0 = Math.max(0, Math.floor((x - pad + WORLD_SIZE / 2) / cs));
+    const cx1 = Math.min(CHUNKS - 1, Math.floor((x + pad + WORLD_SIZE / 2) / cs));
+    const cz0 = Math.max(0, Math.floor((z - pad + WORLD_SIZE / 2) / cs));
+    const cz1 = Math.min(CHUNKS - 1, Math.floor((z + pad + WORLD_SIZE / 2) / cs));
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const i = cz * CHUNKS + cx;
+        refillChunk(detailMeshes[i], field);
+        refillChunk(lowMeshes[i], field);
+      }
+    }
+  };
+
+  return { group, update, rebuildAt };
 }
 
 /**
@@ -245,6 +263,17 @@ function buildChunk(
   geo.rotateX(-Math.PI / 2);
   geo.translate(x0 + CHUNK_SIZE / 2, 0, z0 + CHUNK_SIZE / 2);
 
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  mesh.matrixAutoUpdate = false;
+  refillChunk(mesh, field);
+  return mesh;
+}
+
+/** Vuelve a muestrear las alturas y normales de un chunk ya creado. */
+function refillChunk(mesh: THREE.Mesh, field: Heightfield): void {
+  const geo = mesh.geometry;
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const nor = geo.attributes.normal as THREE.BufferAttribute;
   const e = 1.2;
@@ -258,10 +287,7 @@ function buildChunk(
     const inv = 1 / Math.hypot(dhx, 1, dhz);
     nor.setXYZ(i, -dhx * inv, inv, -dhz * inv);
   }
-
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  mesh.castShadow = false;
-  mesh.matrixAutoUpdate = false;
-  return mesh;
+  pos.needsUpdate = true;
+  nor.needsUpdate = true;
+  geo.computeBoundingSphere();
 }
